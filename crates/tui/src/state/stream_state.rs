@@ -1,0 +1,22 @@
+/// 流式输出状态，管理行缓冲、表格缓冲、段落缓冲和代码块缓冲。
+pub(crate) struct StreamState {
+    pub(crate) buffer: String,
+    pub(crate) table_buffer: Vec<String>,
+    pub(crate) paragraph: String,
+    pub(crate) code_block: bool,
+    pub(crate) code_block_buffer: Vec<String>,
+    pub(crate) code_block_lang: String,
+}
+
+impl StreamState {
+    pub(crate) fn new() -> Self {
+        Self {
+            buffer: String::new(),
+            table_buffer: Vec::new(),
+            paragraph: String::new(),
+            code_block: false,
+            code_block_buffer: Vec::new(),
+            code_block_lang: String::new(),
+        }
+    }
+}

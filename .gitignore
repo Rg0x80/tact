@@ -1,0 +1,10 @@
+/target/
+*.log
+.env
+.ideal
+.idea/
+.claude
+.deepseek
+.openai
+.tact/
+skills
