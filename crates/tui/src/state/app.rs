@@ -16,10 +16,9 @@ use chrono::Local;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListState, ScrollbarState};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tact_core::{AgentErrorKind, AgentUpdate, StepStatus, UserCommand};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tracing_subscriber::fmt::time;
 
 impl App {
     /// 创建初始化的 App 实例，默认进入 Insert 模式并使用 Nord 主题。
@@ -203,36 +202,35 @@ impl App {
                 self.add_system_message(log_msg);
 
                 // 文件写入操作：插入占位行，由 render_log_panel 的 overlay 渲染 diff 块
-                if result.tool == "write_file" {
-                    if let Some(content) = result.detail {
-                        let content_lines = content.lines().count();
-                        let max_preview = 20usize;
-                        let preview_count = content_lines.min(max_preview);
-                        // 占位行：顶部标题 + 预览内容 + 超出提示(可选) + 底部边框 + 分隔空行
-                        let more = if content_lines > max_preview { 1 } else { 0 };
-                        let placeholder_count = 2 + preview_count + more + 1;
-                        let start_idx = self.messages.len();
-                        for _ in 0..placeholder_count {
-                            self.messages.push(Line::from(""));
-                            self.raw_messages.push(String::new());
-                        }
-                        let end_idx = self.messages.len();
-                        self.diff_blocks.push(DiffBlock {
-                            start_idx,
-                            end_idx,
-                            file_path: result.arg_summary.clone(),
-                            content: content.clone(),
-                        });
-                        self.log_scroll.state =
-                            ScrollbarState::new(self.total_log_lines().saturating_sub(1));
-                        if self.input_mode == InputMode::Insert
-                            || self.input_mode == InputMode::Normal
-                        {
-                            self.log_scroll.offset = u16::MAX;
-                        }
-                        if !self.search.term.is_empty() {
-                            self.update_search_matches();
-                        }
+                if result.tool == "write_file"
+                    && let Some(content) = result.detail
+                {
+                    let content_lines = content.lines().count();
+                    let max_preview = 20usize;
+                    let preview_count = content_lines.min(max_preview);
+                    // 占位行：顶部标题 + 预览内容 + 超出提示(可选) + 底部边框 + 分隔空行
+                    let more = if content_lines > max_preview { 1 } else { 0 };
+                    let placeholder_count = 2 + preview_count + more + 1;
+                    let start_idx = self.messages.len();
+                    for _ in 0..placeholder_count {
+                        self.messages.push(Line::from(""));
+                        self.raw_messages.push(String::new());
+                    }
+                    let end_idx = self.messages.len();
+                    self.diff_blocks.push(DiffBlock {
+                        start_idx,
+                        end_idx,
+                        file_path: result.arg_summary.clone(),
+                        content: content.clone(),
+                    });
+                    self.log_scroll.state =
+                        ScrollbarState::new(self.total_log_lines().saturating_sub(1));
+                    if self.input_mode == InputMode::Insert || self.input_mode == InputMode::Normal
+                    {
+                        self.log_scroll.offset = u16::MAX;
+                    }
+                    if !self.search.term.is_empty() {
+                        self.update_search_matches();
                     }
                 }
 
@@ -532,6 +530,48 @@ impl App {
         }
     }
 
+    /// 在 Log 区域输出启动 Logo（ASCII 艺术 "T" + 标语），仅在 TUI 启动时调用一次。
+    pub(crate) fn add_startup_logo(&mut self) {
+        let logo = [
+            "  ████████╗ ",
+            "  ╚══██╔══╝ ",
+            "     ██║    ",
+            "     ██║    ",
+            "     ██║    ",
+            "     ╚═╝    ",
+        ];
+
+        self.add_new_line();
+        for line in &logo {
+            self.messages.push(Line::from(Span::styled(
+                (*line).to_string(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            self.raw_messages.push((*line).to_string());
+        }
+
+        let title = "  Tact Agent";
+        self.messages.push(Line::from(Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        self.raw_messages.push(title.to_string());
+
+        let tagline = "  thoughtful communication";
+        self.messages.push(Line::from(Span::styled(
+            tagline.to_string(),
+            Style::default()
+                .fg(Color::Rgb(128, 128, 128))
+                .add_modifier(Modifier::ITALIC),
+        )));
+        self.raw_messages.push(tagline.to_string());
+        self.add_new_line();
+    }
+
     /// 添加一条系统消息，根据前缀自动着色，并更新滚动位置。
     /// 非系统标记消息会被解析为 Markdown。
     pub(crate) fn add_system_message(&mut self, content: String) {
@@ -610,7 +650,7 @@ impl App {
 
     /// 切换到下一个内置主题。
     /// 从 `.tact/history.txt` 加载输入历史。
-    fn load_history(work_dir: &PathBuf) -> Vec<String> {
+    fn load_history(work_dir: &Path) -> Vec<String> {
         let path = work_dir.join(".tact").join("history.txt");
         std::fs::read_to_string(&path)
             .map(|s| s.lines().map(|l| l.to_string()).collect())
@@ -1166,11 +1206,11 @@ impl App {
         };
 
         // 1. 尝试原生剪贴板
-        if let Ok(mut clip) = Clipboard::new() {
-            if clip.set_text(&text).is_ok() {
-                self.add_system_message(format!("📋 Copied: {}", preview));
-                return;
-            }
+        if let Ok(mut clip) = Clipboard::new()
+            && clip.set_text(&text).is_ok()
+        {
+            self.add_system_message(format!("📋 Copied: {}", preview));
+            return;
         }
 
         // 2. 回退：OSC 52 终端剪贴板
@@ -1239,11 +1279,11 @@ impl App {
             text.clone()
         };
 
-        if let Ok(mut clip) = Clipboard::new() {
-            if clip.set_text(text).is_ok() {
-                self.add_system_message(format!("📋 Copied: {}", preview));
-                return;
-            }
+        if let Ok(mut clip) = Clipboard::new()
+            && clip.set_text(text).is_ok()
+        {
+            self.add_system_message(format!("📋 Copied: {}", preview));
+            return;
         }
         let encoded = BASE64.encode(text);
         let osc52 = format!("\x1b]52;c;{}\x07", encoded);

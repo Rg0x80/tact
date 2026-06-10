@@ -293,7 +293,7 @@ impl Agent {
             }
 
             // 在沙箱中执行工具调用
-            let result = self.execute_step(&step).await;
+            let result = self.execute_step(step).await;
             match result {
                 Ok(output) => {
                     let arg_summary = match step.tool.as_str() {
@@ -392,7 +392,7 @@ impl Agent {
         }
         let content = resp
             .choices
-            .get(0)
+            .first()
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
         // 清理 LLM 可能包裹的 markdown 代码块
