@@ -80,7 +80,7 @@ pub(crate) fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
         let top_text = msgs
             .bottom_top_tmpl
             .replacen("{}", focus, 1)
-            .replacen("{}", tips, 1)
+            //.replacen("{}", tips, 1)
             .replacen("{}", &app.workspace_dir, 1)
             .replacen("{}", branch, 1);
         let cache_str = if app.status_bar.token_cache_hit > 0 {
@@ -101,8 +101,8 @@ pub(crate) fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
         let style = Style::default()
             .bg(app.theme.bottom_bar_bg)
             .fg(app.theme.bottom_bar_fg);
-        let bar1 = Paragraph::new(top_text).style(style.clone());
-        let bar2 = Paragraph::new(mid_text).style(style.clone());
+        let bar1 = Paragraph::new(top_text).style(style);
+        let bar2 = Paragraph::new(mid_text).style(style);
         frame.render_widget(bar1, top_area);
         frame.render_widget(bar2, mid_area);
 
