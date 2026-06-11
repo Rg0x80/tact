@@ -228,6 +228,14 @@ pub(crate) fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(Color::Rgb(255, 255, 255))
                 .add_modifier(Modifier::BOLD),
         )
+    } else if let Some((ref msg, _)) = app.flash_msg {
+        (
+            format!("⚠ {}", msg),
+            Style::default()
+                .bg(app.theme.warning)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         (status_text, status_style)
     };

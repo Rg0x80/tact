@@ -173,11 +173,17 @@ pub async fn run_tui(
             }
         }
 
+        // flash_msg 3s 后自动消失
+        if app.flash_msg.as_ref().map(|(_, t)| t.elapsed().as_secs() >= 3).unwrap_or(false) {
+            app.flash_msg = None;
+            app.dirty = true;
+        }
+
         // 自适应空闲轮询间隔：根据状态调整等待事件的超时时间。
         // - Done 状态：200ms，频繁检查 2s 超时转 Idle
         // - 脏标记置位：10ms，快速触发重新渲染
         // - 完全空闲：1000ms，降低 CPU 唤醒频率
-        let idle_ms = if matches!(app.status, Status::Done) {
+        let idle_ms = if matches!(app.status, Status::Done) || app.flash_msg.is_some() {
             200u64
         } else if app.dirty {
             10u64

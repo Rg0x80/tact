@@ -180,4 +180,10 @@ pub struct App {
     pub(crate) konami_progress: u8,
     /// 当前界面语言。
     pub(crate) language: Language,
+    /// 短暂状态栏通知（显示 3s 后自动消失）
+    pub(crate) flash_msg: Option<(String, std::time::Instant)>,
+    /// 输入框 undo 栈（最多 100 条，每次变更前保存快照）
+    pub(crate) undo_stack: Vec<(String, usize)>,
+    /// 输入框 redo 栈
+    pub(crate) redo_stack: Vec<(String, usize)>,
 }

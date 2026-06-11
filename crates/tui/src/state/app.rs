@@ -18,6 +18,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListState, ScrollbarState};
 use std::path::{Path, PathBuf};
 use tact_core::{AgentErrorKind, AgentUpdate, StepStatus, UserCommand};
+
+const CODE_BG: Color = Color::Rgb(30, 35, 50);
+const CODE_FG: Color = Color::Rgb(200, 200, 210);
+const STREAMING_INDICATOR: &str = " ▌";
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 impl App {
@@ -92,6 +96,9 @@ impl App {
             party_mode: false,
             konami_progress: 0,
             language: Language::English,
+            flash_msg: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 
@@ -281,12 +288,20 @@ impl App {
             AgentUpdate::Error(kind) => {
                 match kind {
                     AgentErrorKind::BalanceNotSupported => {
-                        // Notice: no display the error message to the user.
                         self.balance_info = None;
+                        self.flash_msg = Some((
+                            "Balance query not supported for this model".to_string(),
+                            std::time::Instant::now(),
+                        ));
+                        self.dirty = true;
                     }
-                    AgentErrorKind::BalanceQueryFailed(_err) => {
-                        // Notice: no display the error message to the user.
+                    AgentErrorKind::BalanceQueryFailed(err) => {
                         self.balance_info = None;
+                        self.flash_msg = Some((
+                            format!("Balance query failed: {}", err),
+                            std::time::Instant::now(),
+                        ));
+                        self.dirty = true;
                     }
                     AgentErrorKind::Other(msg) => {
                         // 致命错误：flush 残留流式行
@@ -433,18 +448,71 @@ impl App {
                     let is_code_fence_close = trimmed == "```" && self.stream.code_block;
 
                     if is_code_fence_close {
-                        // 闭合 ``` → flush 整个代码块
+                        // 闭合 ``` → 移除流式指示符，用语法高亮版本替换增量渲染的行
+                        let last_idx = self.messages.len().saturating_sub(1);
+                        if let Some(last_raw) = self.raw_messages.get_mut(last_idx) {
+                            if last_raw.ends_with(STREAMING_INDICATOR) {
+                                let trimmed_raw = last_raw
+                                    .trim_end_matches(STREAMING_INDICATOR)
+                                    .to_string();
+                                *last_raw = trimmed_raw.clone();
+                                self.messages[last_idx] = Line::from(Span::styled(
+                                    trimmed_raw,
+                                    Style::default().fg(CODE_FG).bg(CODE_BG),
+                                ));
+                            }
+                        }
+
                         let lang = std::mem::take(&mut self.stream.code_block_lang);
                         let lines = std::mem::take(&mut self.stream.code_block_buffer);
                         let code_text = format!("```{}\n{}\n```", lang, lines.join("\n"));
-                        if !code_text.trim().is_empty() {
+
+                        if let Some(start_idx) = self.stream.code_block_start_idx.take() {
+                            let line_count = self.stream.code_block_line_count;
+                            let end_idx = start_idx + line_count;
+                            if !code_text.trim().is_empty() {
+                                let (styled, raw) = render_markdown_tui(&code_text);
+                                let _: Vec<_> =
+                                    self.messages.splice(start_idx..end_idx, styled).collect();
+                                let _: Vec<_> =
+                                    self.raw_messages.splice(start_idx..end_idx, raw).collect();
+                            } else {
+                                self.messages.drain(start_idx..end_idx);
+                                self.raw_messages.drain(start_idx..end_idx);
+                            }
+                        } else if !code_text.trim().is_empty() {
                             let (styled, raw) = render_markdown_tui(&code_text);
                             completed.extend(styled.into_iter().zip(raw));
                         }
                         self.stream.code_block = false;
+                        self.stream.code_block_line_count = 0;
                     } else if self.stream.code_block {
-                        // 代码块内部：缓冲行
-                        self.stream.code_block_buffer.push(line);
+                        // 代码块内部：增量渲染，逐行显示
+                        self.stream.code_block_buffer.push(line.clone());
+
+                        let prev_idx = self.messages.len().saturating_sub(1);
+                        if self.stream.code_block_line_count > 1 {
+                            if let Some(prev_raw) = self.raw_messages.get_mut(prev_idx) {
+                                if prev_raw.ends_with(STREAMING_INDICATOR) {
+                                    let trimmed_raw = prev_raw
+                                        .trim_end_matches(STREAMING_INDICATOR)
+                                        .to_string();
+                                    *prev_raw = trimmed_raw.clone();
+                                    self.messages[prev_idx] = Line::from(Span::styled(
+                                        trimmed_raw,
+                                        Style::default().fg(CODE_FG).bg(CODE_BG),
+                                    ));
+                                }
+                            }
+                        }
+
+                        let display_text = format!("{}{}", line, STREAMING_INDICATOR);
+                        self.messages.push(Line::from(Span::styled(
+                            display_text,
+                            Style::default().fg(CODE_FG).bg(CODE_BG),
+                        )));
+                        self.raw_messages.push(line);
+                        self.stream.code_block_line_count += 1;
                     } else if is_code_fence {
                         // 开启新的代码块：先 flush 之前累积的内容
                         if !self.stream.paragraph.is_empty() {
@@ -458,10 +526,27 @@ impl App {
                             completed.extend(styled.into_iter().zip(raw));
                             self.stream.table_buffer.clear();
                         }
+
+                        // flush completed 行，确保 start_idx 计算准确
+                        for (styled_line, raw_line) in completed.drain(..) {
+                            self.messages.push(styled_line);
+                            self.raw_messages.push(raw_line);
+                        }
+
+                        let lang =
+                            trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
                         self.stream.code_block = true;
                         self.stream.code_block_buffer.clear();
-                        self.stream.code_block_lang =
-                            trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
+                        self.stream.code_block_lang = lang.clone();
+                        self.stream.code_block_start_idx = Some(self.messages.len());
+                        self.stream.code_block_line_count = 1;
+
+                        let header_text = format!("```{}", lang);
+                        self.messages.push(Line::from(Span::styled(
+                            header_text.clone(),
+                            Style::default().fg(Color::Gray).bg(CODE_BG),
+                        )));
+                        self.raw_messages.push(header_text);
                     } else {
                         // 常规行处理
                         let is_table_line = trimmed.starts_with('|');
@@ -570,6 +655,15 @@ impl App {
         )));
         self.raw_messages.push(tagline.to_string());
         self.add_new_line();
+    }
+
+    /// 保存当前输入状态到 undo 栈，并清空 redo 栈。最多保留 100 条快照。
+    pub(crate) fn save_undo(&mut self) {
+        self.redo_stack.clear();
+        self.undo_stack.push((self.input.clone(), self.input_cursor));
+        if self.undo_stack.len() > 100 {
+            self.undo_stack.remove(0);
+        }
     }
 
     /// 添加一条系统消息，根据前缀自动着色，并更新滚动位置。
@@ -963,15 +1057,45 @@ impl App {
         }
         // flush 未闭合的代码块（流中断时可能残留）
         if self.stream.code_block {
+            // 移除最后一行的流式指示符
+            let last_idx = self.messages.len().saturating_sub(1);
+            if let Some(last_raw) = self.raw_messages.get_mut(last_idx) {
+                if last_raw.ends_with(STREAMING_INDICATOR) {
+                    let trimmed_raw = last_raw
+                        .trim_end_matches(STREAMING_INDICATOR)
+                        .to_string();
+                    *last_raw = trimmed_raw.clone();
+                    self.messages[last_idx] = Line::from(Span::styled(
+                        trimmed_raw,
+                        Style::default().fg(CODE_FG).bg(CODE_BG),
+                    ));
+                }
+            }
+
             let lang = std::mem::take(&mut self.stream.code_block_lang);
             let code_lines = std::mem::take(&mut self.stream.code_block_buffer);
             let code_text = format!("```{}\n{}\n```", lang, code_lines.join("\n"));
-            if !code_text.trim().is_empty() {
+
+            if let Some(start_idx) = self.stream.code_block_start_idx.take() {
+                let line_count = self.stream.code_block_line_count;
+                let end_idx = start_idx + line_count;
+                if !code_text.trim().is_empty() {
+                    let (styled, raw) = render_markdown_tui(&code_text);
+                    let _: Vec<_> =
+                        self.messages.splice(start_idx..end_idx, styled).collect();
+                    let _: Vec<_> =
+                        self.raw_messages.splice(start_idx..end_idx, raw).collect();
+                } else {
+                    self.messages.drain(start_idx..end_idx);
+                    self.raw_messages.drain(start_idx..end_idx);
+                }
+            } else if !code_text.trim().is_empty() {
                 let (lines, raw_lines) = render_markdown_tui(&code_text);
                 self.messages.extend(lines);
                 self.raw_messages.extend(raw_lines);
             }
             self.stream.code_block = false;
+            self.stream.code_block_line_count = 0;
         }
         // flush 累积的段落（尚未遇到空行的内容，如流结束时的最后一段）
         if !self.stream.paragraph.is_empty() {

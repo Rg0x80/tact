@@ -116,7 +116,20 @@ pub(super) fn handle_normal_mode(
             app.cmd_line.clear();
             app.palette_selected = 0;
         }
-        KeyCode::Char('i') | KeyCode::Enter => {
+        KeyCode::Enter => {
+            if matches!(&app.status, Status::WaitingForUser { .. }) {
+                let old_status = std::mem::replace(&mut app.status, Status::Idle);
+                if let Status::WaitingForUser { approval_tx, .. } = old_status {
+                    let _ = approval_tx.send(true);
+                    let msgs = app.msgs();
+                    app.add_system_message(msgs.step_approved.to_string());
+                    app.add_new_line();
+                }
+            } else {
+                app.input_mode = InputMode::Insert;
+            }
+        }
+        KeyCode::Char('i') => {
             app.input_mode = InputMode::Insert;
         }
         KeyCode::Char('y') => {
@@ -228,12 +241,45 @@ pub(super) fn handle_normal_mode(
                 let _ = _user_cmd_tx.send(UserCommand::Cancel);
             }
         }
+        KeyCode::Char('t') => {
+            // 打开最近可见的 thinking 卡片弹窗
+            if app.thinking.popup.is_some() {
+                app.close_thinking_popup();
+            } else if !app.thinking.blocks.is_empty() {
+                // 找到 title_idx 最接近当前滚动位置（且不超过）的块，否则取最新
+                let logical_offset = app.log_scroll.offset as usize;
+                let best = app
+                    .thinking
+                    .blocks
+                    .iter()
+                    .filter(|b| {
+                        app.phys_to_logical_fast(b.title_idx)
+                            .map(|l| l <= logical_offset)
+                            .unwrap_or(false)
+                    })
+                    .last()
+                    .or_else(|| app.thinking.blocks.last());
+                if let Some(block) = best {
+                    let title_idx = block.title_idx;
+                    app.open_thinking_popup(title_idx);
+                }
+            }
+        }
         KeyCode::Char('q') => {
             app.should_quit = true;
         }
         KeyCode::Esc => {
-            app.mouse.log_selection = None;
-            app.mouse.plan_selection = None;
+            if matches!(&app.status, Status::WaitingForUser { .. }) {
+                let old_status = std::mem::replace(&mut app.status, Status::Idle);
+                if let Status::WaitingForUser { approval_tx, .. } = old_status {
+                    let _ = approval_tx.send(false);
+                    let msgs = app.msgs();
+                    app.add_system_message(msgs.step_rejected.to_string());
+                }
+            } else {
+                app.mouse.log_selection = None;
+                app.mouse.plan_selection = None;
+            }
         }
         _ => {}
     }
@@ -433,6 +479,7 @@ pub(super) fn handle_insert_mode(
                 || key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
             {
                 // insert blank charater for writing next line
+                app.save_undo();
                 app.input.insert(app.input_cursor, '\n');
                 app.input_cursor += 1;
             } else if !app.input.is_empty() {
@@ -478,6 +525,7 @@ pub(super) fn handle_insert_mode(
             app.input_history.index = None;
             app.input_history.saved.clear();
             if app.input_cursor > 0 {
+                app.save_undo();
                 let pos = prev_word_boundary(&app.input, app.input_cursor);
                 app.input.drain(pos..app.input_cursor);
                 app.input_cursor = pos;
@@ -488,6 +536,7 @@ pub(super) fn handle_insert_mode(
             app.input_history.index = None;
             app.input_history.saved.clear();
             if app.input_cursor > 0 {
+                app.save_undo();
                 let pos = prev_word_boundary(&app.input, app.input_cursor);
                 app.input.drain(pos..app.input_cursor);
                 app.input_cursor = pos;
@@ -518,6 +567,9 @@ pub(super) fn handle_insert_mode(
             exit_history(app);
             let end = end_of_line(&app.input, app.input_cursor);
             let delete_end = if end < app.input.len() { end + 1 } else { end };
+            if app.input_cursor < delete_end {
+                app.save_undo();
+            }
             app.input.drain(app.input_cursor..delete_end);
         }
         KeyCode::Char('d') if key.modifiers.contains(crossterm::event::KeyModifiers::ALT) => {
@@ -525,6 +577,7 @@ pub(super) fn handle_insert_mode(
             app.input_history.index = None;
             app.input_history.saved.clear();
             if app.input_cursor < app.input.len() {
+                app.save_undo();
                 let pos = next_word_boundary(&app.input, app.input_cursor);
                 app.input.drain(app.input_cursor..pos);
             }
@@ -537,6 +590,9 @@ pub(super) fn handle_insert_mode(
         {
             exit_history(app);
             let start = start_of_line(&app.input, app.input_cursor);
+            if start < app.input_cursor {
+                app.save_undo();
+            }
             app.input.drain(start..app.input_cursor);
             app.input_cursor = start;
         }
@@ -548,6 +604,7 @@ pub(super) fn handle_insert_mode(
         {
             exit_history(app);
             if app.input_cursor < app.input.len() {
+                app.save_undo();
                 let next = next_char_boundary(&app.input, app.input_cursor);
                 app.input.drain(app.input_cursor..next);
             }
@@ -575,14 +632,83 @@ pub(super) fn handle_insert_mode(
                 .contains(crossterm::event::KeyModifiers::CONTROL) =>
         {
             exit_history(app);
-            let pos = prev_word_boundary(&app.input, app.input_cursor);
-            app.input.drain(pos..app.input_cursor);
-            app.input_cursor = pos;
+            if app.input_cursor > 0 {
+                app.save_undo();
+                let pos = prev_word_boundary(&app.input, app.input_cursor);
+                app.input.drain(pos..app.input_cursor);
+                app.input_cursor = pos;
+            }
+        }
+        // Ctrl+P: 历史向前（不受光标行位置限制）
+        KeyCode::Char('p')
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            if !app.input_history.entries.is_empty() {
+                if app.input_history.index.is_none() {
+                    app.input_history.saved = app.input.clone();
+                    app.input_history.index = Some(app.input_history.entries.len() - 1);
+                } else if let Some(idx) = app.input_history.index {
+                    if idx > 0 {
+                        app.input_history.index = Some(idx - 1);
+                    }
+                }
+                if let Some(idx) = app.input_history.index {
+                    app.input = app.input_history.entries[idx].clone();
+                    app.input_cursor = app.input.len();
+                }
+            }
+        }
+        // Ctrl+N: 历史向后（不受光标行位置限制）
+        KeyCode::Char('n')
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            if let Some(idx) = app.input_history.index {
+                if idx + 1 < app.input_history.entries.len() {
+                    app.input_history.index = Some(idx + 1);
+                    app.input = app.input_history.entries[idx + 1].clone();
+                    app.input_cursor = app.input.len();
+                } else {
+                    app.input_history.index = None;
+                    app.input = std::mem::take(&mut app.input_history.saved);
+                    app.input_cursor = app.input.len();
+                }
+            }
+        }
+        // Ctrl+Z: undo
+        KeyCode::Char('z')
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            if let Some((prev_input, prev_cursor)) = app.undo_stack.pop() {
+                app.redo_stack
+                    .push((app.input.clone(), app.input_cursor));
+                app.input = prev_input;
+                app.input_cursor = prev_cursor;
+            }
+        }
+        // Ctrl+Y: redo
+        KeyCode::Char('y')
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            if let Some((next_input, next_cursor)) = app.redo_stack.pop() {
+                app.undo_stack
+                    .push((app.input.clone(), app.input_cursor));
+                app.input = next_input;
+                app.input_cursor = next_cursor;
+            }
         }
         KeyCode::Char(c) => {
             // Typing anything exits history navigation
             app.input_history.index = None;
             app.input_history.saved.clear();
+            app.save_undo();
             app.input.insert(app.input_cursor, c);
             app.input_cursor += c.len_utf8();
         }
@@ -591,6 +717,7 @@ pub(super) fn handle_insert_mode(
             app.input_history.index = None;
             app.input_history.saved.clear();
             if app.input_cursor > 0 {
+                app.save_undo();
                 let prev = prev_char_boundary(&app.input, app.input_cursor);
                 app.input.remove(prev);
                 app.input_cursor = prev;
@@ -601,6 +728,7 @@ pub(super) fn handle_insert_mode(
             app.input_history.index = None;
             app.input_history.saved.clear();
             if app.input_cursor < app.input.len() {
+                app.save_undo();
                 app.input.remove(app.input_cursor);
             }
         }
