@@ -2,9 +2,9 @@
 // Extracted from state.rs to keep file sizes manageable.
 
 use super::{
-    App, DiffBlock, DiffPopup, FocusedPanel, HistoryEntry, InputHistory, InputMode, LogScroll,
-    MouseState, PlanPanel, SearchState, SelectPopup, Status, StatusBarState, StreamState,
-    ThinkingBlock, ThinkingPopup, ThinkingState,
+    App, CodeBlock, DiffBlock, DiffPopup, FocusedPanel, HistoryEntry, InputHistory, InputMode,
+    LogScroll, MouseState, PlanPanel, SearchState, SelectPopup, Status, StatusBarState,
+    StreamState, ThinkingBlock, ThinkingPopup, ThinkingState,
     render_md::{format_table, is_horizontal_rule, render_markdown_tui},
 };
 use crate::i18n::{Language, Messages};
@@ -90,6 +90,7 @@ impl App {
             select: SelectPopup::new(),
             diff_blocks: Vec::new(),
             diff_popup: None,
+            code_blocks: Vec::new(),
             stream: StreamState::new(),
             thinking: ThinkingState::new(),
             balance_info: None,
@@ -448,73 +449,80 @@ impl App {
                     let is_code_fence_close = trimmed == "```" && self.stream.code_block;
 
                     if is_code_fence_close {
-                        // 闭合 ``` → 移除流式指示符，用语法高亮版本替换增量渲染的行
-                        let last_idx = self.messages.len().saturating_sub(1);
-                        if let Some(last_raw) = self.raw_messages.get_mut(last_idx) {
-                            if last_raw.ends_with(STREAMING_INDICATOR) {
-                                let trimmed_raw = last_raw
-                                    .trim_end_matches(STREAMING_INDICATOR)
-                                    .to_string();
-                                *last_raw = trimmed_raw.clone();
-                                self.messages[last_idx] = Line::from(Span::styled(
-                                    trimmed_raw,
-                                    Style::default().fg(CODE_FG).bg(CODE_BG),
-                                ));
-                            }
-                        }
-
+                        // Completed: replace streaming placeholders with a sized blank region,
+                        // then store a CodeBlock overlay for card rendering.
+                        const MAX_CODE_PREVIEW: usize = 30;
                         let lang = std::mem::take(&mut self.stream.code_block_lang);
                         let lines = std::mem::take(&mut self.stream.code_block_buffer);
-                        let code_text = format!("```{}\n{}\n```", lang, lines.join("\n"));
 
                         if let Some(start_idx) = self.stream.code_block_start_idx.take() {
-                            let line_count = self.stream.code_block_line_count;
-                            let end_idx = start_idx + line_count;
-                            if !code_text.trim().is_empty() {
-                                let (styled, raw) = render_markdown_tui(&code_text);
-                                let _: Vec<_> =
-                                    self.messages.splice(start_idx..end_idx, styled).collect();
-                                let _: Vec<_> =
-                                    self.raw_messages.splice(start_idx..end_idx, raw).collect();
+                            let stream_end = start_idx + self.stream.code_block_line_count;
+
+                            if !lines.is_empty() {
+                                let code_text =
+                                    format!("```{}\n{}\n```", lang, lines.join("\n"));
+                                let (styled, _) = render_markdown_tui(&code_text);
+                                let placeholder_count =
+                                    styled.len().min(MAX_CODE_PREVIEW) + 2; // +2 for card border
+                                let placeholders: Vec<Line<'static>> =
+                                    (0..placeholder_count).map(|_| Line::from("")).collect();
+                                let raw_placeholders: Vec<String> =
+                                    (0..placeholder_count).map(|_| String::new()).collect();
+                                let _: Vec<_> = self
+                                    .messages
+                                    .splice(start_idx..stream_end, placeholders)
+                                    .collect();
+                                let _: Vec<_> = self
+                                    .raw_messages
+                                    .splice(start_idx..stream_end, raw_placeholders)
+                                    .collect();
+                                self.code_blocks.push(CodeBlock {
+                                    start_idx,
+                                    end_idx: start_idx + placeholder_count,
+                                    lang,
+                                    content: lines.join("\n"),
+                                    styled,
+                                });
                             } else {
-                                self.messages.drain(start_idx..end_idx);
-                                self.raw_messages.drain(start_idx..end_idx);
+                                self.messages.drain(start_idx..stream_end);
+                                self.raw_messages.drain(start_idx..stream_end);
                             }
-                        } else if !code_text.trim().is_empty() {
+                        } else if !lines.is_empty() {
+                            let code_text = format!("```{}\n{}\n```", lang, lines.join("\n"));
                             let (styled, raw) = render_markdown_tui(&code_text);
                             completed.extend(styled.into_iter().zip(raw));
                         }
                         self.stream.code_block = false;
                         self.stream.code_block_line_count = 0;
                     } else if self.stream.code_block {
-                        // 代码块内部：增量渲染，逐行显示
+                        // Streaming: update previous line (remove indicator), append new line with indicator
                         self.stream.code_block_buffer.push(line.clone());
 
                         let prev_idx = self.messages.len().saturating_sub(1);
                         if self.stream.code_block_line_count > 1 {
                             if let Some(prev_raw) = self.raw_messages.get_mut(prev_idx) {
                                 if prev_raw.ends_with(STREAMING_INDICATOR) {
-                                    let trimmed_raw = prev_raw
+                                    let clean = prev_raw
                                         .trim_end_matches(STREAMING_INDICATOR)
                                         .to_string();
-                                    *prev_raw = trimmed_raw.clone();
-                                    self.messages[prev_idx] = Line::from(Span::styled(
-                                        trimmed_raw,
-                                        Style::default().fg(CODE_FG).bg(CODE_BG),
-                                    ));
+                                    *prev_raw = clean.clone();
+                                    self.messages[prev_idx] = Line::from(vec![
+                                        Span::styled("│ ", Style::default().fg(Color::DarkGray).bg(CODE_BG)),
+                                        Span::styled(clean, Style::default().fg(CODE_FG).bg(CODE_BG)),
+                                    ]);
                                 }
                             }
                         }
 
-                        let display_text = format!("{}{}", line, STREAMING_INDICATOR);
-                        self.messages.push(Line::from(Span::styled(
-                            display_text,
-                            Style::default().fg(CODE_FG).bg(CODE_BG),
-                        )));
+                        let display_line = format!("{}{}", line, STREAMING_INDICATOR);
+                        self.messages.push(Line::from(vec![
+                            Span::styled("│ ", Style::default().fg(Color::DarkGray).bg(CODE_BG)),
+                            Span::styled(display_line, Style::default().fg(CODE_FG).bg(CODE_BG)),
+                        ]));
                         self.raw_messages.push(line);
                         self.stream.code_block_line_count += 1;
                     } else if is_code_fence {
-                        // 开启新的代码块：先 flush 之前累积的内容
+                        // Open new code block: flush pending content first
                         if !self.stream.paragraph.is_empty() {
                             let paragraph = std::mem::take(&mut self.stream.paragraph);
                             let (styled, raw) = render_markdown_tui(&paragraph);
@@ -527,7 +535,7 @@ impl App {
                             self.stream.table_buffer.clear();
                         }
 
-                        // flush completed 行，确保 start_idx 计算准确
+                        // Flush completed lines so start_idx is accurate
                         for (styled_line, raw_line) in completed.drain(..) {
                             self.messages.push(styled_line);
                             self.raw_messages.push(raw_line);
@@ -541,12 +549,18 @@ impl App {
                         self.stream.code_block_start_idx = Some(self.messages.len());
                         self.stream.code_block_line_count = 1;
 
-                        let header_text = format!("```{}", lang);
+                        // Container header: ╭─ lang ─────
+                        let label = if lang.is_empty() {
+                            "code".to_string()
+                        } else {
+                            lang.clone()
+                        };
+                        let header_text = format!("╭─ {} ", label);
                         self.messages.push(Line::from(Span::styled(
                             header_text.clone(),
-                            Style::default().fg(Color::Gray).bg(CODE_BG),
+                            Style::default().fg(Color::DarkGray).bg(CODE_BG),
                         )));
-                        self.raw_messages.push(header_text);
+                        self.raw_messages.push(format!("```{}", lang));
                     } else {
                         // 常规行处理
                         let is_table_line = trimmed.starts_with('|');
@@ -1055,41 +1069,43 @@ impl App {
             self.raw_messages.extend(raw_lines);
             self.stream.table_buffer.clear();
         }
-        // flush 未闭合的代码块（流中断时可能残留）
+        // flush incomplete code block (interrupted stream)
         if self.stream.code_block {
-            // 移除最后一行的流式指示符
-            let last_idx = self.messages.len().saturating_sub(1);
-            if let Some(last_raw) = self.raw_messages.get_mut(last_idx) {
-                if last_raw.ends_with(STREAMING_INDICATOR) {
-                    let trimmed_raw = last_raw
-                        .trim_end_matches(STREAMING_INDICATOR)
-                        .to_string();
-                    *last_raw = trimmed_raw.clone();
-                    self.messages[last_idx] = Line::from(Span::styled(
-                        trimmed_raw,
-                        Style::default().fg(CODE_FG).bg(CODE_BG),
-                    ));
-                }
-            }
-
+            const MAX_CODE_PREVIEW: usize = 30;
             let lang = std::mem::take(&mut self.stream.code_block_lang);
             let code_lines = std::mem::take(&mut self.stream.code_block_buffer);
-            let code_text = format!("```{}\n{}\n```", lang, code_lines.join("\n"));
 
             if let Some(start_idx) = self.stream.code_block_start_idx.take() {
-                let line_count = self.stream.code_block_line_count;
-                let end_idx = start_idx + line_count;
-                if !code_text.trim().is_empty() {
-                    let (styled, raw) = render_markdown_tui(&code_text);
-                    let _: Vec<_> =
-                        self.messages.splice(start_idx..end_idx, styled).collect();
-                    let _: Vec<_> =
-                        self.raw_messages.splice(start_idx..end_idx, raw).collect();
+                let stream_end = start_idx + self.stream.code_block_line_count;
+                if !code_lines.is_empty() {
+                    let code_text = format!("```{}\n{}\n```", lang, code_lines.join("\n"));
+                    let (styled, _) = render_markdown_tui(&code_text);
+                    let placeholder_count = styled.len().min(MAX_CODE_PREVIEW) + 2;
+                    let placeholders: Vec<Line<'static>> =
+                        (0..placeholder_count).map(|_| Line::from("")).collect();
+                    let raw_placeholders: Vec<String> =
+                        (0..placeholder_count).map(|_| String::new()).collect();
+                    let _: Vec<_> = self
+                        .messages
+                        .splice(start_idx..stream_end, placeholders)
+                        .collect();
+                    let _: Vec<_> = self
+                        .raw_messages
+                        .splice(start_idx..stream_end, raw_placeholders)
+                        .collect();
+                    self.code_blocks.push(CodeBlock {
+                        start_idx,
+                        end_idx: start_idx + placeholder_count,
+                        lang,
+                        content: code_lines.join("\n"),
+                        styled,
+                    });
                 } else {
-                    self.messages.drain(start_idx..end_idx);
-                    self.raw_messages.drain(start_idx..end_idx);
+                    self.messages.drain(start_idx..stream_end);
+                    self.raw_messages.drain(start_idx..stream_end);
                 }
-            } else if !code_text.trim().is_empty() {
+            } else if !code_lines.is_empty() {
+                let code_text = format!("```{}\n{}\n```", lang, code_lines.join("\n"));
                 let (lines, raw_lines) = render_markdown_tui(&code_text);
                 self.messages.extend(lines);
                 self.raw_messages.extend(raw_lines);
