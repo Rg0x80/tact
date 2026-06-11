@@ -90,6 +90,20 @@ pub(crate) struct DiffPopup {
     pub scroll: u16,
 }
 
+/// A completed LLM code block, rendered as a card overlay in the log panel.
+#[derive(Debug, Clone)]
+pub(crate) struct CodeBlock {
+    /// First placeholder line index in messages (inclusive).
+    pub start_idx: usize,
+    /// One-past-last placeholder line index in messages.
+    pub end_idx: usize,
+    pub lang: String,
+    /// Raw source lines (without ``` fences), used for copy and rendering.
+    pub content: String,
+    /// Pre-rendered styled lines for the card interior.
+    pub styled: Vec<Line<'static>>,
+}
+
 // ========== 执行状态 ==========
 
 /// Agent 当前的执行状态，用于驱动状态栏和 UI 反馈。
@@ -166,6 +180,8 @@ pub struct App {
     pub(crate) diff_blocks: Vec<DiffBlock>,
     /// 文件写入内容的弹窗预览。
     pub(crate) diff_popup: Option<DiffPopup>,
+    /// Completed LLM code block overlays.
+    pub(crate) code_blocks: Vec<CodeBlock>,
     // 选择弹窗
     pub(crate) select: SelectPopup,
     // 流式输出状态
@@ -180,4 +196,10 @@ pub struct App {
     pub(crate) konami_progress: u8,
     /// 当前界面语言。
     pub(crate) language: Language,
+    /// 短暂状态栏通知（显示 3s 后自动消失）
+    pub(crate) flash_msg: Option<(String, std::time::Instant)>,
+    /// 输入框 undo 栈（最多 100 条，每次变更前保存快照）
+    pub(crate) undo_stack: Vec<(String, usize)>,
+    /// 输入框 redo 栈
+    pub(crate) redo_stack: Vec<(String, usize)>,
 }

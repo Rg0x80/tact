@@ -1,9 +1,10 @@
-use crate::state::{App, InputMode};
+use crate::state::{App, InputMode, Status};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::Style,
-    widgets::{Block, BorderType, Borders, Paragraph},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -35,6 +36,11 @@ pub(crate) fn render_command_line(frame: &mut Frame, area: Rect, app: &App) {
 pub(crate) fn render_input_box(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.input_mode == InputMode::Search || app.input_mode == InputMode::Palette {
         render_command_line(frame, area, app);
+        return;
+    }
+
+    if matches!(app.status, Status::WaitingForUser { .. }) {
+        render_approval_banner(frame, area, app);
         return;
     }
 
@@ -82,4 +88,39 @@ pub(crate) fn render_input_box(frame: &mut Frame, area: Rect, app: &mut App) {
     let cursor_x = area.x + 1 + cursor_col as u16;
     let cursor_y = area.y + 1 + (cursor_line - app.input_scroll as usize) as u16;
     frame.set_cursor_position((cursor_x, cursor_y));
+}
+
+fn render_approval_banner(frame: &mut Frame, area: Rect, app: &App) {
+    let prompt = match &app.status {
+        Status::WaitingForUser { prompt, .. } => prompt.as_str(),
+        _ => "",
+    };
+
+    let msgs = app.msgs();
+    let banner_text = msgs.approval_banner_tmpl.replace("{}", prompt);
+    let keys_text = msgs.approval_banner_keys;
+
+    let banner_style = Style::default()
+        .bg(app.theme.warning)
+        .fg(Color::Black)
+        .add_modifier(Modifier::BOLD);
+
+    let keys_style = Style::default()
+        .bg(app.theme.warning)
+        .fg(Color::Black);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(app.theme.warning))
+        .style(Style::default().bg(app.theme.warning));
+
+    let text = ratatui::text::Text::from(vec![
+        Line::from(Span::styled(banner_text, banner_style)),
+        Line::from(Span::styled(keys_text, keys_style)),
+    ]);
+
+    let para = Paragraph::new(text).block(block);
+    frame.render_widget(Clear, area);
+    frame.render_widget(para, area);
 }

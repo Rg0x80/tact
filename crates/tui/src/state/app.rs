@@ -2,9 +2,9 @@
 // Extracted from state.rs to keep file sizes manageable.
 
 use super::{
-    App, DiffBlock, DiffPopup, FocusedPanel, HistoryEntry, InputHistory, InputMode, LogScroll,
-    MouseState, PlanPanel, SearchState, SelectPopup, Status, StatusBarState, StreamState,
-    ThinkingBlock, ThinkingPopup, ThinkingState,
+    App, CodeBlock, DiffBlock, DiffPopup, FocusedPanel, HistoryEntry, InputHistory, InputMode,
+    LogScroll, MouseState, PlanPanel, SearchState, SelectPopup, Status, StatusBarState,
+    StreamState, ThinkingBlock, ThinkingPopup, ThinkingState,
     render_md::{format_table, is_horizontal_rule, render_markdown_tui},
 };
 use crate::i18n::{Language, Messages};
@@ -16,10 +16,13 @@ use chrono::Local;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListState, ScrollbarState};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tact_core::{AgentErrorKind, AgentUpdate, StepStatus, UserCommand};
+
+const CODE_BG: Color = Color::Rgb(30, 35, 50);
+const CODE_FG: Color = Color::Rgb(200, 200, 210);
+const STREAMING_INDICATOR: &str = " ▌";
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tracing_subscriber::fmt::time;
 
 impl App {
     /// 创建初始化的 App 实例，默认进入 Insert 模式并使用 Nord 主题。
@@ -87,12 +90,16 @@ impl App {
             select: SelectPopup::new(),
             diff_blocks: Vec::new(),
             diff_popup: None,
+            code_blocks: Vec::new(),
             stream: StreamState::new(),
             thinking: ThinkingState::new(),
             balance_info: None,
             party_mode: false,
             konami_progress: 0,
             language: Language::English,
+            flash_msg: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 
@@ -203,36 +210,35 @@ impl App {
                 self.add_system_message(log_msg);
 
                 // 文件写入操作：插入占位行，由 render_log_panel 的 overlay 渲染 diff 块
-                if result.tool == "write_file" {
-                    if let Some(content) = result.detail {
-                        let content_lines = content.lines().count();
-                        let max_preview = 20usize;
-                        let preview_count = content_lines.min(max_preview);
-                        // 占位行：顶部标题 + 预览内容 + 超出提示(可选) + 底部边框 + 分隔空行
-                        let more = if content_lines > max_preview { 1 } else { 0 };
-                        let placeholder_count = 2 + preview_count + more + 1;
-                        let start_idx = self.messages.len();
-                        for _ in 0..placeholder_count {
-                            self.messages.push(Line::from(""));
-                            self.raw_messages.push(String::new());
-                        }
-                        let end_idx = self.messages.len();
-                        self.diff_blocks.push(DiffBlock {
-                            start_idx,
-                            end_idx,
-                            file_path: result.arg_summary.clone(),
-                            content: content.clone(),
-                        });
-                        self.log_scroll.state =
-                            ScrollbarState::new(self.total_log_lines().saturating_sub(1));
-                        if self.input_mode == InputMode::Insert
-                            || self.input_mode == InputMode::Normal
-                        {
-                            self.log_scroll.offset = u16::MAX;
-                        }
-                        if !self.search.term.is_empty() {
-                            self.update_search_matches();
-                        }
+                if result.tool == "write_file"
+                    && let Some(content) = result.detail
+                {
+                    let content_lines = content.lines().count();
+                    let max_preview = 20usize;
+                    let preview_count = content_lines.min(max_preview);
+                    // 占位行：顶部标题 + 预览内容 + 超出提示(可选) + 底部边框 + 分隔空行
+                    let more = if content_lines > max_preview { 1 } else { 0 };
+                    let placeholder_count = 2 + preview_count + more + 1;
+                    let start_idx = self.messages.len();
+                    for _ in 0..placeholder_count {
+                        self.messages.push(Line::from(""));
+                        self.raw_messages.push(String::new());
+                    }
+                    let end_idx = self.messages.len();
+                    self.diff_blocks.push(DiffBlock {
+                        start_idx,
+                        end_idx,
+                        file_path: result.arg_summary.clone(),
+                        content: content.clone(),
+                    });
+                    self.log_scroll.state =
+                        ScrollbarState::new(self.total_log_lines().saturating_sub(1));
+                    if self.input_mode == InputMode::Insert || self.input_mode == InputMode::Normal
+                    {
+                        self.log_scroll.offset = u16::MAX;
+                    }
+                    if !self.search.term.is_empty() {
+                        self.update_search_matches();
                     }
                 }
 
@@ -283,12 +289,20 @@ impl App {
             AgentUpdate::Error(kind) => {
                 match kind {
                     AgentErrorKind::BalanceNotSupported => {
-                        // Notice: no display the error message to the user.
                         self.balance_info = None;
+                        self.flash_msg = Some((
+                            "Balance query not supported for this model".to_string(),
+                            std::time::Instant::now(),
+                        ));
+                        self.dirty = true;
                     }
-                    AgentErrorKind::BalanceQueryFailed(_err) => {
-                        // Notice: no display the error message to the user.
+                    AgentErrorKind::BalanceQueryFailed(err) => {
                         self.balance_info = None;
+                        self.flash_msg = Some((
+                            format!("Balance query failed: {}", err),
+                            std::time::Instant::now(),
+                        ));
+                        self.dirty = true;
                     }
                     AgentErrorKind::Other(msg) => {
                         // 致命错误：flush 残留流式行
@@ -435,20 +449,80 @@ impl App {
                     let is_code_fence_close = trimmed == "```" && self.stream.code_block;
 
                     if is_code_fence_close {
-                        // 闭合 ``` → flush 整个代码块
+                        // Completed: replace streaming placeholders with a sized blank region,
+                        // then store a CodeBlock overlay for card rendering.
+                        const MAX_CODE_PREVIEW: usize = 30;
                         let lang = std::mem::take(&mut self.stream.code_block_lang);
                         let lines = std::mem::take(&mut self.stream.code_block_buffer);
-                        let code_text = format!("```{}\n{}\n```", lang, lines.join("\n"));
-                        if !code_text.trim().is_empty() {
+
+                        if let Some(start_idx) = self.stream.code_block_start_idx.take() {
+                            let stream_end = start_idx + self.stream.code_block_line_count;
+
+                            if !lines.is_empty() {
+                                let code_text =
+                                    format!("```{}\n{}\n```", lang, lines.join("\n"));
+                                let (styled, _) = render_markdown_tui(&code_text);
+                                let placeholder_count =
+                                    styled.len().min(MAX_CODE_PREVIEW) + 2; // +2 for card border
+                                let placeholders: Vec<Line<'static>> =
+                                    (0..placeholder_count).map(|_| Line::from("")).collect();
+                                let raw_placeholders: Vec<String> =
+                                    (0..placeholder_count).map(|_| String::new()).collect();
+                                let _: Vec<_> = self
+                                    .messages
+                                    .splice(start_idx..stream_end, placeholders)
+                                    .collect();
+                                let _: Vec<_> = self
+                                    .raw_messages
+                                    .splice(start_idx..stream_end, raw_placeholders)
+                                    .collect();
+                                self.code_blocks.push(CodeBlock {
+                                    start_idx,
+                                    end_idx: start_idx + placeholder_count,
+                                    lang,
+                                    content: lines.join("\n"),
+                                    styled,
+                                });
+                            } else {
+                                self.messages.drain(start_idx..stream_end);
+                                self.raw_messages.drain(start_idx..stream_end);
+                            }
+                        } else if !lines.is_empty() {
+                            let code_text = format!("```{}\n{}\n```", lang, lines.join("\n"));
                             let (styled, raw) = render_markdown_tui(&code_text);
                             completed.extend(styled.into_iter().zip(raw));
                         }
                         self.stream.code_block = false;
+                        self.stream.code_block_line_count = 0;
                     } else if self.stream.code_block {
-                        // 代码块内部：缓冲行
-                        self.stream.code_block_buffer.push(line);
+                        // Streaming: update previous line (remove indicator), append new line with indicator
+                        self.stream.code_block_buffer.push(line.clone());
+
+                        let prev_idx = self.messages.len().saturating_sub(1);
+                        if self.stream.code_block_line_count > 1 {
+                            if let Some(prev_raw) = self.raw_messages.get_mut(prev_idx) {
+                                if prev_raw.ends_with(STREAMING_INDICATOR) {
+                                    let clean = prev_raw
+                                        .trim_end_matches(STREAMING_INDICATOR)
+                                        .to_string();
+                                    *prev_raw = clean.clone();
+                                    self.messages[prev_idx] = Line::from(vec![
+                                        Span::styled("│ ", Style::default().fg(Color::DarkGray).bg(CODE_BG)),
+                                        Span::styled(clean, Style::default().fg(CODE_FG).bg(CODE_BG)),
+                                    ]);
+                                }
+                            }
+                        }
+
+                        let display_line = format!("{}{}", line, STREAMING_INDICATOR);
+                        self.messages.push(Line::from(vec![
+                            Span::styled("│ ", Style::default().fg(Color::DarkGray).bg(CODE_BG)),
+                            Span::styled(display_line, Style::default().fg(CODE_FG).bg(CODE_BG)),
+                        ]));
+                        self.raw_messages.push(line);
+                        self.stream.code_block_line_count += 1;
                     } else if is_code_fence {
-                        // 开启新的代码块：先 flush 之前累积的内容
+                        // Open new code block: flush pending content first
                         if !self.stream.paragraph.is_empty() {
                             let paragraph = std::mem::take(&mut self.stream.paragraph);
                             let (styled, raw) = render_markdown_tui(&paragraph);
@@ -460,10 +534,33 @@ impl App {
                             completed.extend(styled.into_iter().zip(raw));
                             self.stream.table_buffer.clear();
                         }
+
+                        // Flush completed lines so start_idx is accurate
+                        for (styled_line, raw_line) in completed.drain(..) {
+                            self.messages.push(styled_line);
+                            self.raw_messages.push(raw_line);
+                        }
+
+                        let lang =
+                            trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
                         self.stream.code_block = true;
                         self.stream.code_block_buffer.clear();
-                        self.stream.code_block_lang =
-                            trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
+                        self.stream.code_block_lang = lang.clone();
+                        self.stream.code_block_start_idx = Some(self.messages.len());
+                        self.stream.code_block_line_count = 1;
+
+                        // Container header: ╭─ lang ─────
+                        let label = if lang.is_empty() {
+                            "code".to_string()
+                        } else {
+                            lang.clone()
+                        };
+                        let header_text = format!("╭─ {} ", label);
+                        self.messages.push(Line::from(Span::styled(
+                            header_text.clone(),
+                            Style::default().fg(Color::DarkGray).bg(CODE_BG),
+                        )));
+                        self.raw_messages.push(format!("```{}", lang));
                     } else {
                         // 常规行处理
                         let is_table_line = trimmed.starts_with('|');
@@ -529,6 +626,57 @@ impl App {
         self.log_scroll.state = ScrollbarState::new(self.total_log_lines().saturating_sub(1));
         if !self.search.term.is_empty() {
             self.update_search_matches();
+        }
+    }
+
+    /// 在 Log 区域输出启动 Logo（ASCII 艺术 "T" + 标语），仅在 TUI 启动时调用一次。
+    pub(crate) fn add_startup_logo(&mut self) {
+        let logo = [
+            "  ████████╗ ",
+            "  ╚══██╔══╝ ",
+            "     ██║    ",
+            "     ██║    ",
+            "     ██║    ",
+            "     ╚═╝    ",
+        ];
+
+        self.add_new_line();
+        for line in &logo {
+            self.messages.push(Line::from(Span::styled(
+                (*line).to_string(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            self.raw_messages.push((*line).to_string());
+        }
+
+        let title = "  Tact Agent";
+        self.messages.push(Line::from(Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        self.raw_messages.push(title.to_string());
+
+        let tagline = "  thoughtful communication";
+        self.messages.push(Line::from(Span::styled(
+            tagline.to_string(),
+            Style::default()
+                .fg(Color::Rgb(128, 128, 128))
+                .add_modifier(Modifier::ITALIC),
+        )));
+        self.raw_messages.push(tagline.to_string());
+        self.add_new_line();
+    }
+
+    /// 保存当前输入状态到 undo 栈，并清空 redo 栈。最多保留 100 条快照。
+    pub(crate) fn save_undo(&mut self) {
+        self.redo_stack.clear();
+        self.undo_stack.push((self.input.clone(), self.input_cursor));
+        if self.undo_stack.len() > 100 {
+            self.undo_stack.remove(0);
         }
     }
 
@@ -610,7 +758,7 @@ impl App {
 
     /// 切换到下一个内置主题。
     /// 从 `.tact/history.txt` 加载输入历史。
-    fn load_history(work_dir: &PathBuf) -> Vec<String> {
+    fn load_history(work_dir: &Path) -> Vec<String> {
         let path = work_dir.join(".tact").join("history.txt");
         std::fs::read_to_string(&path)
             .map(|s| s.lines().map(|l| l.to_string()).collect())
@@ -921,17 +1069,49 @@ impl App {
             self.raw_messages.extend(raw_lines);
             self.stream.table_buffer.clear();
         }
-        // flush 未闭合的代码块（流中断时可能残留）
+        // flush incomplete code block (interrupted stream)
         if self.stream.code_block {
+            const MAX_CODE_PREVIEW: usize = 30;
             let lang = std::mem::take(&mut self.stream.code_block_lang);
             let code_lines = std::mem::take(&mut self.stream.code_block_buffer);
-            let code_text = format!("```{}\n{}\n```", lang, code_lines.join("\n"));
-            if !code_text.trim().is_empty() {
+
+            if let Some(start_idx) = self.stream.code_block_start_idx.take() {
+                let stream_end = start_idx + self.stream.code_block_line_count;
+                if !code_lines.is_empty() {
+                    let code_text = format!("```{}\n{}\n```", lang, code_lines.join("\n"));
+                    let (styled, _) = render_markdown_tui(&code_text);
+                    let placeholder_count = styled.len().min(MAX_CODE_PREVIEW) + 2;
+                    let placeholders: Vec<Line<'static>> =
+                        (0..placeholder_count).map(|_| Line::from("")).collect();
+                    let raw_placeholders: Vec<String> =
+                        (0..placeholder_count).map(|_| String::new()).collect();
+                    let _: Vec<_> = self
+                        .messages
+                        .splice(start_idx..stream_end, placeholders)
+                        .collect();
+                    let _: Vec<_> = self
+                        .raw_messages
+                        .splice(start_idx..stream_end, raw_placeholders)
+                        .collect();
+                    self.code_blocks.push(CodeBlock {
+                        start_idx,
+                        end_idx: start_idx + placeholder_count,
+                        lang,
+                        content: code_lines.join("\n"),
+                        styled,
+                    });
+                } else {
+                    self.messages.drain(start_idx..stream_end);
+                    self.raw_messages.drain(start_idx..stream_end);
+                }
+            } else if !code_lines.is_empty() {
+                let code_text = format!("```{}\n{}\n```", lang, code_lines.join("\n"));
                 let (lines, raw_lines) = render_markdown_tui(&code_text);
                 self.messages.extend(lines);
                 self.raw_messages.extend(raw_lines);
             }
             self.stream.code_block = false;
+            self.stream.code_block_line_count = 0;
         }
         // flush 累积的段落（尚未遇到空行的内容，如流结束时的最后一段）
         if !self.stream.paragraph.is_empty() {
@@ -1166,11 +1346,11 @@ impl App {
         };
 
         // 1. 尝试原生剪贴板
-        if let Ok(mut clip) = Clipboard::new() {
-            if clip.set_text(&text).is_ok() {
-                self.add_system_message(format!("📋 Copied: {}", preview));
-                return;
-            }
+        if let Ok(mut clip) = Clipboard::new()
+            && clip.set_text(&text).is_ok()
+        {
+            self.add_system_message(format!("📋 Copied: {}", preview));
+            return;
         }
 
         // 2. 回退：OSC 52 终端剪贴板
@@ -1239,11 +1419,11 @@ impl App {
             text.clone()
         };
 
-        if let Ok(mut clip) = Clipboard::new() {
-            if clip.set_text(text).is_ok() {
-                self.add_system_message(format!("📋 Copied: {}", preview));
-                return;
-            }
+        if let Ok(mut clip) = Clipboard::new()
+            && clip.set_text(text).is_ok()
+        {
+            self.add_system_message(format!("📋 Copied: {}", preview));
+            return;
         }
         let encoded = BASE64.encode(text);
         let osc52 = format!("\x1b]52;c;{}\x07", encoded);
