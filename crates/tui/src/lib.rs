@@ -8,6 +8,8 @@ mod render;
 mod state;
 mod theme;
 
+mod widgets;
+
 use crate::handlers::{
     handle_insert_mode, handle_normal_mode, handle_palette_mode, handle_search_mode,
     handle_select_mode,

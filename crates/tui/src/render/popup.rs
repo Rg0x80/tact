@@ -69,79 +69,30 @@ pub(crate) fn render_command_palette(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(list, inner);
 }
 
-/// 渲染选择弹窗，居中显示 prompt 和选项列表。
+/// 渲染选择弹窗，居中显示 prompt 和选项列表（委托给 SelectPopupWidget）。
 pub(crate) fn render_select_popup(frame: &mut Frame, area: Rect, app: &App) {
-    let count = app.select.options.len().max(1) as u16;
-    let popup_width = 50u16.min(area.width.saturating_sub(4));
-    let popup_height = (count + 4).min(area.height.saturating_sub(4));
-    let popup_x = (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = (area.height.saturating_sub(popup_height)) / 2;
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
-
-    frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {} ", app.select.prompt))
-        .style(Style::default().bg(app.theme.bottom_bar_bg));
-    frame.render_widget(block.clone(), popup_area);
-
-    let inner = Rect::new(
-        popup_area.x + 1,
-        popup_area.y + 1,
-        popup_area.width.saturating_sub(2),
-        popup_area.height.saturating_sub(2),
+    use crate::widgets::select_popup_widget::SelectPopupWidget;
+    let widget = SelectPopupWidget::new(
+        &app.select,
+        app.theme.highlight,
+        app.theme.fg,
+        app.theme.bottom_bar_bg,
+        app.msgs().select_empty,
+        app.msgs().select_arrow,
     );
-
-    let items: Vec<ListItem> = if app.select.options.is_empty() {
-        vec![ListItem::new(Span::styled(
-            app.msgs().select_empty,
-            Style::default().fg(Color::Gray),
-        ))]
-    } else {
-        let selected = app.select.selected.min(app.select.options.len().saturating_sub(1));
-        app.select
-            .options
-            .iter()
-            .enumerate()
-            .map(|(i, opt)| {
-                let is_selected = i == selected;
-                let style = if is_selected {
-                    Style::default().bg(app.theme.highlight).fg(Color::White)
-                } else {
-                    Style::default().fg(app.theme.fg)
-                };
-                let prefix = if is_selected { app.msgs().select_arrow } else { "  " };
-                ListItem::new(Span::styled(format!("{}{}", prefix, opt), style))
-            })
-            .collect()
-    };
-
-    let list = List::new(items).block(Block::default());
-    frame.render_widget(list, inner);
+    frame.render_widget(widget, area);
 }
 
-/// 渲染任务历史面板，按时间倒序展示。
-pub(crate) fn render_history_panel(frame: &mut Frame, area: Rect, app: &mut App) {
-    let items: Vec<ListItem> = app
-        .task_history
-        .iter()
-        .rev()
-        .enumerate()
-        .map(|(_i, entry)| {
-            let mut text = format!("[{}] {}", entry.timestamp, entry.task);
-            if !entry.summary.is_empty() {
-                text.push_str(&format!(" -> {}", entry.summary));
-            }
-            ListItem::new(text).style(Style::default().fg(app.theme.accent))
-        })
-        .collect();
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(app.theme.border))
-            .title(app.msgs().history_title),
+/// 渲染任务历史面板，按时间倒序展示（委托给 HistoryPopupWidget）。
+pub(crate) fn render_history_panel(frame: &mut Frame, area: Rect, app: &App) {
+    use crate::widgets::history_panel_widget::HistoryPopupWidget;
+    let widget = HistoryPopupWidget::new(
+        &app.task_history,
+        app.theme.accent,
+        app.theme.border,
+        app.msgs().history_title,
     );
-    frame.render_widget(list, area);
+    frame.render_widget(widget, area);
 }
 
 /// 渲染帮助面板，展示所有可用的键盘快捷键和鼠标操作。
