@@ -5,6 +5,7 @@ pub(crate) mod cells;
 mod input;
 mod layout;
 mod log;
+mod log_column;
 mod plan;
 mod popup;
 pub(crate) mod renderable;

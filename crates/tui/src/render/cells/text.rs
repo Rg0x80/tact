@@ -5,6 +5,19 @@ use ratatui::text::{Line, Span};
 use crate::render::renderable::Renderable;
 use crate::render::util::wrap_line;
 
+/// 将单行 span 写入 buffer。
+fn render_line(line: &Line, x: u16, y: u16, width: u16, buf: &mut Buffer) {
+    let mut col = x;
+    for span in &line.spans {
+        for ch in span.content.chars() {
+            if col < x + width {
+                buf[(col, y)].set_char(ch).set_style(span.style);
+                col += 1;
+            }
+        }
+    }
+}
+
 /// 单条日志消息的渲染单元。
 /// 预缓存折行结果，支持搜索高亮和鼠标选区。
 pub(crate) struct TextCell {
@@ -24,8 +37,6 @@ pub(crate) struct TextCell {
     prefix: Option<String>,
     /// 普通前景色。
     fg_color: Color,
-    /// 高亮背景色。
-    highlight_color: Color,
 }
 
 impl TextCell {
@@ -39,7 +50,6 @@ impl TextCell {
         word_selection: Option<(usize, usize)>,
         prefix: Option<String>,
         fg_color: Color,
-        highlight_color: Color,
     ) -> Self {
         TextCell {
             cached_lines,
@@ -50,11 +60,23 @@ impl TextCell {
             word_selection,
             prefix,
             fg_color,
-            highlight_color,
         }
     }
 
-    /// 构建带搜索高亮的行（与原先 log.rs 中 `build_search_highlighted_line` 逻辑一致）。
+    /// 构建渲染用的视觉行列表（根据状态选择搜索高亮/选区/缓存）。
+    fn build_lines(&self, wrap_width: u16) -> Vec<Line<'_>> {
+        if self.is_search_match {
+            return self.build_highlighted_line(wrap_width);
+        }
+        if self.is_selected {
+            if let Some((ws, we)) = self.word_selection {
+                return self.build_word_selected_lines(wrap_width, ws, we);
+            }
+            return self.build_line_selected_lines();
+        }
+        self.cached_lines.clone()
+    }
+
     fn build_highlighted_line(&self, wrap_width: u16) -> Vec<Line<'static>> {
         let lower_raw = self.raw_text.to_lowercase();
         let lower_term = self.search_term.to_lowercase();
@@ -90,6 +112,39 @@ impl TextCell {
         }
         wrap_line(&line, wrap_width as usize)
     }
+
+    fn build_word_selected_lines(&self, wrap_width: u16, ws: usize, we: usize) -> Vec<Line<'static>> {
+        let raw = &self.raw_text;
+        let w_start = raw.floor_char_boundary(ws.min(raw.len()));
+        let w_end = raw.floor_char_boundary(we.min(raw.len()));
+        let (w_start, w_end) = if w_end < w_start {
+            (w_end, w_start)
+        } else {
+            (w_start, w_end)
+        };
+        let before = &raw[..w_start];
+        let word = &raw[w_start..w_end];
+        let after = &raw[w_end..];
+        let styled_line = Line::from(vec![
+            Span::raw(before.to_string()),
+            Span::styled(word.to_string(), Style::default().add_modifier(Modifier::REVERSED)),
+            Span::raw(after.to_string()),
+        ]);
+        wrap_line(&styled_line, wrap_width as usize)
+    }
+
+    fn build_line_selected_lines(&self) -> Vec<Line<'static>> {
+        self.cached_lines
+            .iter()
+            .map(|line| {
+                let mut line = line.clone();
+                for span in line.spans.iter_mut() {
+                    span.style = span.style.add_modifier(Modifier::REVERSED);
+                }
+                line
+            })
+            .collect()
+    }
 }
 
 impl Renderable for TextCell {
@@ -97,59 +152,15 @@ impl Renderable for TextCell {
         self.cached_lines.len() as u16
     }
 
-    fn render(&self, area: Rect, buf: &mut Buffer) {
-        let wrap_width = area.width as usize;
-        let lines: Vec<Line> = if self.is_search_match {
-            self.build_highlighted_line(area.width)
-        } else if self.is_selected {
-            if let Some((ws, we)) = self.word_selection {
-                // 词级选区：从 raw_text 切片并高亮
-                let raw = &self.raw_text;
-                let w_start = raw.floor_char_boundary(ws.min(raw.len()));
-                let w_end = raw.floor_char_boundary(we.min(raw.len()));
-                let (w_start, w_end) = if w_end < w_start {
-                    (w_end, w_start)
-                } else {
-                    (w_start, w_end)
-                };
-                let before = &raw[..w_start];
-                let word = &raw[w_start..w_end];
-                let after = &raw[w_end..];
-                let styled_line = Line::from(vec![
-                    Span::raw(before.to_string()),
-                    Span::styled(
-                        word.to_string(),
-                        Style::default().add_modifier(Modifier::REVERSED),
-                    ),
-                    Span::raw(after.to_string()),
-                ]);
-                wrap_line(&styled_line, wrap_width)
-            } else {
-                // 行级选区：给缓存行加 REVERSED
-                self.cached_lines
-                    .iter()
-                    .map(|line| {
-                        let mut line = line.clone();
-                        for span in line.spans.iter_mut() {
-                            span.style = span.style.add_modifier(Modifier::REVERSED);
-                        }
-                        line
-                    })
-                    .collect()
-            }
-        } else {
-            // 普通渲染
-            self.cached_lines.clone()
-        };
-
-        // 绘制视觉行
+    fn render_partial(&self, area: Rect, buf: &mut Buffer, skip_lines: usize) {
+        let lines = self.build_lines(area.width);
         let mut y = area.y;
-        for (i, line) in lines.iter().enumerate() {
+        for (i, line) in lines.iter().enumerate().skip(skip_lines) {
             if y >= area.y + area.height {
                 break;
             }
             let mut line = line.clone();
-            // 首行添加 prefix（thinking 折叠指示符）
+            // 只在 cell 首行（i == 0）添加 prefix
             if i == 0 {
                 if let Some(ref prefix) = self.prefix {
                     if let Some(first) = line.spans.first_mut() {
@@ -157,18 +168,12 @@ impl Renderable for TextCell {
                     }
                 }
             }
-            // 将 line 的 spans 写入 buffer 的一行
-            let mut x = area.x;
-            for span in &line.spans {
-                let content = span.content.as_ref();
-                for ch in content.chars() {
-                    if x < area.x + area.width {
-                        buf[(x, y)].set_char(ch).set_style(span.style);
-                        x += 1;
-                    }
-                }
-            }
+            render_line(&line, area.x, y, area.width, buf);
             y += 1;
         }
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.render_partial(area, buf, 0);
     }
 }

@@ -3,49 +3,10 @@ use crate::state::App;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState},
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, Scrollbar, ScrollbarState},
 };
-
-/// 构建带搜索高亮的 Line。
-fn build_search_highlighted_line<'a>(
-    raw: &'a str,
-    term: &str,
-    base_fg: Color,
-    is_selected: bool,
-) -> Line<'a> {
-    let mut spans = Vec::new();
-    let lower_raw = raw.to_lowercase();
-    let lower_term = term.to_lowercase();
-    let mut last_idx = 0;
-
-    for (match_idx, _) in lower_raw.match_indices(&lower_term) {
-        if match_idx > last_idx {
-            spans.push(Span::styled(
-                &raw[last_idx..match_idx],
-                Style::default().fg(base_fg),
-            ));
-        }
-        let end_idx = match_idx + lower_term.len();
-        spans.push(Span::styled(
-            &raw[match_idx..end_idx],
-            Style::default().bg(Color::Yellow).fg(Color::Black),
-        ));
-        last_idx = end_idx;
-    }
-    if last_idx < raw.len() {
-        spans.push(Span::styled(&raw[last_idx..], Style::default().fg(base_fg)));
-    }
-
-    let mut line = Line::from(spans);
-    if is_selected {
-        for span in line.spans.iter_mut() {
-            span.style = span.style.add_modifier(Modifier::REVERSED);
-        }
-    }
-    line
-}
 
 /// 渲染 Log 面板，支持长行自动折行、滚动、搜索高亮和鼠标选择高亮。
 pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -139,7 +100,7 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
     };
     let end_visual = (visual_scroll + visible_height).min(total_visual);
 
-    // ---- Phase 3: render visible lines ----
+    // ---- Phase 3: build cells and render ----
     let logical_start = match vs_cache.binary_search(&visual_scroll) {
         Ok(i) => i,
         Err(i) => i.saturating_sub(1),
@@ -151,21 +112,16 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let has_search = !app.search.term.is_empty();
     let has_selection = app.mouse.log_selection.is_some();
+    let search_term = app.search.term.clone();
+    let log_fg = app.theme.fg;
 
-    let mut text = Text::default();
+    let mut renderer = super::log_column::LogColumnRenderer::new()
+        .with_viewport(visual_scroll, visible_height);
+
     for logical_i in logical_start..logical_end {
         let cache_start = vs_cache[logical_i];
         let cache_end = vs_cache[logical_i + 1];
         if cache_end <= visual_scroll || cache_start >= end_visual {
-            continue;
-        }
-
-        let vis_start_in_block = visual_scroll.max(cache_start);
-        let vis_end_in_block = end_visual.min(cache_end);
-        let block_offset = vis_start_in_block - cache_start;
-        let block_count = vis_end_in_block - vis_start_in_block;
-
-        if block_count == 0 {
             continue;
         }
 
@@ -178,106 +134,70 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
                 .unwrap_or(false);
 
         let phys_idx = app.visible_indices.get(logical_i).copied();
-        let cached_slice = &app.log_scroll.visual_cache[cache_start..cache_end];
-
-        if !has_search && !is_selected {
-            for line in &cached_slice[block_offset..block_offset + block_count] {
-                text.push_line(line.clone());
-            }
-        } else if has_search && is_match {
-            if let Some(phys) = phys_idx {
-                let raw = &app.raw_messages[phys];
-                let line =
-                    build_search_highlighted_line(raw, &app.search.term, app.theme.fg, is_selected);
-                let wrapped = wrap_line(&line, wrap_width);
-                let local_start = block_offset.min(wrapped.len());
-                let local_end = (block_offset + block_count).min(wrapped.len());
-                for wline in &wrapped[local_start..local_end] {
-                    text.push_line(wline.clone());
-                }
-            }
+        let cached_lines: Vec<Line<'static>> =
+            app.log_scroll.visual_cache[cache_start..cache_end].to_vec();
+        let raw_text = phys_idx
+            .map(|p| app.raw_messages[p].clone())
+            .unwrap_or_default();
+        let word_sel = app
+            .mouse
+            .log_word_selection
+            .filter(|_| is_selected && phys_idx.is_some());
+        let se_search_term = if is_match {
+            search_term.clone()
         } else {
-            // 选择高亮 / 无高亮回退
-            let mut push_count = 0;
-            let word_sel = app
-                .mouse
-                .log_word_selection
-                .filter(|_| is_selected && phys_idx.is_some());
-            for (local_i, cached_line) in cached_slice.iter().enumerate().skip(block_offset) {
-                if push_count >= block_count {
-                    break;
-                }
-                if let Some((ws, we)) = word_sel {
-                    let raw = &app.raw_messages[phys_idx.unwrap()];
-                    let w_start = raw.floor_char_boundary(ws.min(raw.len()));
-                    let w_end = raw.floor_char_boundary(we.min(raw.len()));
-                    let (w_start, w_end) = if w_end < w_start {
-                        (w_end, w_start)
+            String::new()
+        };
+
+        // 构建 thinking 折叠指示前缀
+        let prefix = phys_idx.and_then(|phys| {
+            app.thinking.blocks.iter().find_map(|block| {
+                if block.title_idx == phys {
+                    let total = block.end_idx.saturating_sub(block.title_idx);
+                    if total > 3 {
+                        Some(
+                            app.msgs()
+                                .scroll_indicator_tmpl
+                                .replacen("{}", &total.min(3).to_string(), 1)
+                                .replacen("{}", &total.to_string(), 1),
+                        )
                     } else {
-                        (w_start, w_end)
-                    };
-                    let before = &raw[..w_start];
-                    let word = &raw[w_start..w_end];
-                    let after = &raw[w_end..];
-                    let styled_line = Line::from(vec![
-                        Span::raw(before.to_string()),
-                        Span::styled(
-                            word.to_string(),
-                            Style::default().add_modifier(Modifier::REVERSED),
-                        ),
-                        Span::raw(after.to_string()),
-                    ]);
-                    let wrapped = wrap_line(&styled_line, wrap_width);
-                    let local_start = block_offset.min(wrapped.len());
-                    let local_end = (block_offset + block_count).min(wrapped.len());
-                    for wline in &wrapped[local_start..local_end] {
-                        text.push_line(wline.clone());
-                        push_count += 1;
+                        None
                     }
                 } else {
-                    let mut line = cached_line.clone();
-                    if is_selected {
-                        for span in line.spans.iter_mut() {
-                            span.style = span.style.add_modifier(Modifier::REVERSED);
-                        }
-                    }
-                    if local_i == 0 {
-                        if let Some(phys) = phys_idx {
-                            for block in &app.thinking.blocks {
-                                if block.title_idx == phys {
-                                    let total = block.end_idx.saturating_sub(block.title_idx);
-                                    let indicator = if total > 3 {
-                                        app.msgs()
-                                            .scroll_indicator_tmpl
-                                            .replacen("{}", &total.min(3).to_string(), 1)
-                                            .replacen("{}", &total.to_string(), 1)
-                                    } else {
-                                        String::new()
-                                    };
-                                    if let Some(first) = line.spans.first_mut() {
-                                        first.content =
-                                            format!("{}{}", indicator, first.content).into();
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    text.push_line(line);
-                    push_count += 1;
+                    None
                 }
-            }
-        }
+            })
+        });
+
+        let cell = super::cells::text::TextCell::new(
+            cached_lines,
+            raw_text,
+            se_search_term,
+            is_match,
+            is_selected,
+            word_sel,
+            prefix,
+            log_fg,
+        );
+
+        renderer.push(vs_cache[logical_i], cell);
     }
 
-    let log_paragraph = Paragraph::new(text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(app.theme.border))
-            .title(app.msgs().log_title)
-            .style(Style::default().bg(app.theme.bg)),
+    // 渲染带边框的 log 面板
+    let log_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.border))
+        .title(app.msgs().log_title)
+        .style(Style::default().bg(app.theme.bg));
+    let inner = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
     );
-    frame.render_widget(log_paragraph, area);
+    frame.render_widget(log_block, area);
+    frame.render_widget(renderer, inner);
 
     // ---- Card overlay: thinking blocks ----
     super::cells::thinking::render_thinking_cards(
