@@ -1,11 +1,13 @@
 //! Render module — split by panel type.
 
 mod bar;
+pub(crate) mod cells;
 mod input;
 mod layout;
 mod log;
 mod plan;
 mod popup;
+pub(crate) mod renderable;
 mod util;
 pub(crate) mod welcome;
 
