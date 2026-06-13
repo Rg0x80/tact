@@ -8,7 +8,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 pub(crate) use tact_core::PlanStep;
 
-mod app;
+pub(crate) mod app;
 mod input_history;
 mod log_scroll;
 mod mouse_state;
