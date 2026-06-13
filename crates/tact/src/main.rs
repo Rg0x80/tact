@@ -86,6 +86,9 @@ async fn main() -> anyhow::Result<()> {
 
     agent.agent_loop().await?;
 
+    // Print session statistics
+    eprintln!("{}", agent.runtime.stats.summary());
+
     let Some(final_content) = agent.runtime.context.last() else {
         return Ok(());
     };
