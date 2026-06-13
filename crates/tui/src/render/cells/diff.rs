@@ -7,7 +7,7 @@ use ratatui::{
 };
 use crate::state::App;
 
-/// 渲染 diff block 卡片叠层。
+/// Render diff block card overlay.
 pub(crate) fn render_diff_cards(
     frame: &mut Frame,
     area: Rect,

@@ -293,12 +293,12 @@ impl LlmClient for OpenAiAdapter {
     }
 
     /*
-    ── 旧版 stream_message（手写 SSE 解析）────────────────────────────────────
-    保留供参考。使用 reqwest-eventsource 替代后修复了以下问题：
-    - 只支持 \n\n 分隔符，不支持 \r\n\r\n
-    - data: [DONE] 的 break 只跳出内层循环，外层仍会 continue
-    - stream_options 未设置，usage 统计死代码
-    - 流结束后缓冲区残留静默丢弃
+    ── Legacy stream_message (hand-written SSE parsing) ───────────────────────
+    Kept for reference. Using reqwest-eventsource fixed the following issues:
+    - Only supported \n\n delimiter, not \r\n\r\n
+    - data: [DONE] break only exited inner loop; outer loop would still continue
+    - stream_options not set; usage stats were dead code
+    - Residual buffer silently discarded after stream end
 
     async fn stream_message(
         &self,

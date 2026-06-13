@@ -1,4 +1,4 @@
-/// 底部状态栏数据，包含模型信息、token 统计等。
+/// Bottom status bar data: model info, token stats, etc.
 pub(crate) struct StatusBarState {
     pub(crate) git_branch: String,
     pub(crate) model_name: String,

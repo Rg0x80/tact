@@ -2,7 +2,7 @@ use crate::theme::Theme;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// 自定义 StyleSheet，为代码块提供深色背景和等宽风格。
+/// Custom StyleSheet that provides dark background and monospace style for code blocks.
 #[derive(Clone, Copy, Debug, Default)]
 struct TuiStyleSheet;
 
@@ -41,8 +41,8 @@ impl tui_markdown::StyleSheet for TuiStyleSheet {
     }
 }
 
-/// 使用 tui-markdown 将 Markdown 文本渲染为 ratatui 的 Line 列表和原始文本列表。
-/// 对代码块进行后处理：添加顶部分隔线（含语言标签）、行号和底部分隔线。
+/// Renders Markdown text into ratatui Line list and raw text list using tui-markdown.
+/// Post-processes code blocks: adds top separator (with language label), line numbers, and bottom separator.
 pub(crate) fn render_markdown_tui(text: &str) -> (Vec<Line<'static>>, Vec<String>) {
     // NOTE: Do NOT call process_hyperlinks here — ratatui strips raw ESC sequences
     // (including OSC 8) from Span text, causing broken ]8;; garbage to appear on screen.
@@ -74,8 +74,8 @@ pub(crate) fn render_markdown_tui(text: &str) -> (Vec<Line<'static>>, Vec<String
     (styled_lines, raw_lines)
 }
 
-/// 为代码块内容行添加统一的深色背景，保持 tui-markdown 原生语法高亮。
-/// ``` 标记行保持原样（由 tui-markdown 渲染）。
+/// Adds a uniform dark background to code block content lines, preserving tui-markdown's native syntax highlighting.
+/// ``` marker lines are kept as-is (rendered by tui-markdown).
 fn apply_code_background(lines: &mut Vec<Line<'static>>, raw: &[String]) {
     let code_bg = Color::Rgb(30, 35, 50);
     let code_fg = Color::Rgb(200, 200, 210);
@@ -84,7 +84,7 @@ fn apply_code_background(lines: &mut Vec<Line<'static>>, raw: &[String]) {
     while i < raw.len() {
         let trimmed = raw[i].trim();
         if trimmed.starts_with("```") {
-            // 查找闭合的 ```
+            // Find closing ```
             let mut end_marker = None;
             let mut j = i + 1;
             while j < raw.len() {
@@ -96,7 +96,7 @@ fn apply_code_background(lines: &mut Vec<Line<'static>>, raw: &[String]) {
             }
 
             if let Some(end) = end_marker {
-                // 内容行加背景（``` 标记行保持原样）
+                // Add background to content lines (``` markers kept as-is)
                 for line_idx in (i + 1)..end {
                     let mut spans: Vec<Span<'static>> = Vec::new();
                     for span in &lines[line_idx].spans {
@@ -119,7 +119,7 @@ fn apply_code_background(lines: &mut Vec<Line<'static>>, raw: &[String]) {
     }
 }
 
-/// 判断一行是否为 Markdown 水平分隔线（---, ***, ___，允许空格穿插）。
+/// Checks whether a line is a Markdown horizontal rule (---, ***, ___, spaces allowed).
 pub(crate) fn is_horizontal_rule(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.len() < 3 {
@@ -136,13 +136,13 @@ pub(crate) fn is_horizontal_rule(line: &str) -> bool {
     marks.iter().all(|&c| c == first)
 }
 
-/// 把 Markdown 表格原始行解析为列对齐的 ratatui Line。
+/// Parses Markdown table raw lines into column-aligned ratatui Lines.
 pub(crate) fn format_table(lines: &[String], theme: &Theme) -> (Vec<Line<'static>>, Vec<String>) {
     let rows: Vec<Vec<String>> = lines
         .iter()
         .map(|line| {
             let mut cells: Vec<String> = line.split('|').map(|s| s.trim().to_string()).collect();
-            // 去掉开头和结尾因行首/行尾 | 产生的空单元格
+            // Strip empty cells caused by leading/trailing |
             if cells.first().map(|s| s.is_empty()).unwrap_or(false) {
                 cells.remove(0);
             }
@@ -157,7 +157,7 @@ pub(crate) fn format_table(lines: &[String], theme: &Theme) -> (Vec<Line<'static
         return (Vec::new(), Vec::new());
     }
 
-    // 计算每列最大宽度
+    // Calculate max width per column
     let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
     let mut col_widths = vec![0; col_count];
     for row in &rows {
@@ -179,13 +179,13 @@ pub(crate) fn format_table(lines: &[String], theme: &Theme) -> (Vec<Line<'static
         }
         let line_text = format!("|{}|", cells.join("|"));
 
-        // 检测分隔行（所有单元格只包含 -、: 和空白）
+        // Detect separator row (all cells contain only -, :, and whitespace)
         let is_sep = row.iter().all(|c| {
             c.chars()
                 .all(|ch| ch == '-' || ch == ':' || ch.is_whitespace())
         });
 
-        // 分隔行不渲染（跳过），避免将数据行误着色为 Gray
+        // Skip rendering separator row to prevent data rows from being mistakenly colored Gray
         if is_sep {
             continue;
         }

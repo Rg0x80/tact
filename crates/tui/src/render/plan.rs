@@ -1,7 +1,7 @@
 use crate::state::{App, Status};
 use ratatui::{Frame, layout::Rect};
 
-/// 渲染 Execution Plan 面板，展示步骤列表、执行状态和选中高亮。
+/// Render the Execution Plan panel, showing step list, execution status, and selection highlight.
 pub(crate) fn render_plan_panel(frame: &mut Frame, area: Rect, app: &mut App) {
     use ratatui::{
         style::{Modifier, Style},

@@ -2,7 +2,7 @@ use crate::state::{App, InputMode};
 use crossterm::event::{KeyCode, KeyEvent};
 use super::prev_word_boundary;
 
-/// Search 模式按键处理：输入搜索关键词，Enter 确认后高亮匹配内容。
+/// Search mode key handling: enter search keywords, Enter to confirm and highlight matches.
 pub(crate) fn handle_search_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {
@@ -11,7 +11,7 @@ pub(crate) fn handle_search_mode(app: &mut App, key: KeyEvent) {
             app.cmd_line.clear();
             app.input_mode = InputMode::Normal;
         }
-        // Ctrl+W: 删除最后一个词
+        // Ctrl+W: delete last word
         KeyCode::Char('w')
             if key
                 .modifiers
@@ -20,7 +20,7 @@ pub(crate) fn handle_search_mode(app: &mut App, key: KeyEvent) {
             let pos = prev_word_boundary(&app.cmd_line, app.cmd_line.len());
             app.cmd_line.drain(pos..);
         }
-        // Ctrl+U: 清空搜索输入
+        // Ctrl+U: clear search input
         KeyCode::Char('u')
             if key
                 .modifiers

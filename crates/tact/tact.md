@@ -1,29 +1,29 @@
-# sfull: 完整 Agent Harness
+# sfull: Complete Agent Harness
 
-`sfull` 是前面章节的整合版本。它把最小 agent loop、工具系统、技能、上下文压缩、权限、hook、memory、任务、后台进程、cron、团队协作、worktree、MCP 和工具路由收敛到同一个 Rust agent runtime 中。
+`sfull` is the integrated version of all previous chapters. It converges the minimal agent loop, tool system, skills, context compaction, permissions, hooks, memory, tasks, background processes, cron, team collaboration, worktree, MCP, and tool routing into a single Rust agent runtime.
 
-本章不是再引入一个新功能，而是回答一个工程问题：
+This section does not introduce a new feature — it answers an engineering question:
 
 ```text
-当 agent harness 的能力越来越多时，如何把 loop、tool、状态、权限和外部插件组织在一个清晰结构里？
+When an agent harness accumulates more and more capabilities, how do you organize the loop, tools, state, permissions, and external plugins into a clear structure?
 ```
 
-## 运行方式
+## Running
 
-在仓库根目录配置 `.env`：
+Configure `.env` at the repository root:
 
 ```bash
 ANTHROPIC_API_KEY=your_api_key
 ANTHROPIC_BASE_URL=your_anthropic_compatible_base_url
 ```
 
-运行：
+Run:
 
 ```bash
 cargo run -p tact
 ```
 
-启动时会选择权限模式：
+At startup, choose a permission mode:
 
 ```text
 Default
@@ -31,32 +31,32 @@ Plan
 Auto
 ```
 
-退出交互：
+Exit:
 
 ```text
 exit()
 ```
 
-## 本章目标
+## Goals
 
-- 把前面章节的能力整合到一个可运行的 agent。
-- 用 `Agent` 表达主运行时边界。
-- 用 `ToolRouter` 管理本地工具。
-- 用 `ToolContext` 给工具注入共享 domain manager。
-- 用 `Store<T>` / `CollectionStore<T>` 收敛领域状态落盘。
-- 让本地工具和 MCP 工具进入同一个 tool use 回路。
-- 在工具执行前统一经过权限和 hook。
-- 在上下文过长、输出截断、临时错误时做恢复。
+- Integrate capabilities from previous chapters into a runnable agent.
+- Express the main runtime boundary with `Agent`.
+- Manage local tools with `ToolRouter`.
+- Inject shared domain managers into tools via `ToolContext`.
+- Converge domain state persistence with `Store<T>` / `CollectionStore<T>`.
+- Route both local tools and MCP tools through the same tool use loop.
+- Enforce unified permission and hook checks before tool execution.
+- Handle recovery for oversized context, output truncation, and transient errors.
 
-## 代码结构
+## Code Structure
 
 ```text
 tact/
 ├── src/
-│   ├── main.rs                   # 初始化和交互 CLI
-│   ├── lib.rs                    # Agent runtime 和主 loop
+│   ├── main.rs                   # Initialization and interactive CLI
+│   ├── lib.rs                    # Agent runtime and main loop
 │   ├── store.rs                  # StoreRoot / Store / CollectionStore
-│   ├── prompt.rs                 # system prompt builder
+│   ├── prompt.rs                 # System prompt builder
 │   ├── system_prompt_template.md
 │   ├── permission.rs
 │   ├── hook.rs
@@ -88,31 +88,31 @@ tact/
 └── tact.md
 ```
 
-建议先读 [`src/main.rs`](./src/main.rs)，再读 [`src/lib.rs`](./src/lib.rs)，最后按 domain 阅读各个 manager 和 tool。
+Suggested reading order: start with [`src/main.rs`](./src/main.rs), then [`src/lib.rs`](./src/lib.rs), then read each domain manager and tool.
 
-## 启动流程
+## Startup Flow
 
-入口在 [`src/main.rs`](./src/main.rs)。启动顺序是：
+Entry point is [`src/main.rs`](./src/main.rs). Startup sequence:
 
 ```text
-创建 LLM client
-  -> 选择 PermissionMode
-  -> 扫描 skills/
-  -> 创建 .claude StoreRoot
-  -> 初始化 task/background/cron/team/worktree manager
-  -> 初始化 memory manager
-  -> 扫描 .claude-plugin/plugin.json 并连接 MCP server
-  -> 构造 ToolContext
-  -> 构造 ToolRouter
-  -> 创建 Agent
-  -> 进入交互 loop
+Create LLM client
+  → Select PermissionMode
+  → Scan skills/
+  → Create .claude StoreRoot
+  → Initialize task/background/cron/team/worktree managers
+  → Initialize memory manager
+  → Scan .claude-plugin/plugin.json and connect MCP servers
+  → Construct ToolContext
+  → Construct ToolRouter
+  → Create Agent
+  → Enter interactive loop
 ```
 
-主 agent 使用动态 system prompt。subagent 使用静态 prompt，让它以 fresh-context coding subagent 的身份完成指定任务并返回总结。
+The main agent uses a dynamic system prompt. Subagents use a static prompt, allowing them to act as fresh-context coding subagents, complete their assigned task, and return a summary.
 
 ## Agent
 
-核心结构在 [`src/lib.rs`](./src/lib.rs)：
+Core structure in [`src/lib.rs`](./src/lib.rs):
 
 ```rust
 pub struct Agent {
@@ -125,40 +125,40 @@ pub struct Agent {
 }
 ```
 
-它把 agent 拆成几块：
+It decomposes the agent into:
 
-- `AgentRuntime`：模型客户端、上下文、compact 状态、recovery 状态、权限管理。
-- `ToolContext`：工具可访问的业务依赖。
-- `ToolRouter`：本地工具注册和调用。
-- `MCPToolRouter`：外部 MCP 工具路由。
-- `hooks`：工具调用前后的扩展点。
-- `system_prompt`：动态或静态 prompt。
+- `AgentRuntime` — model client, context, compaction state, recovery state, permission manager.
+- `ToolContext` — business dependencies accessible to tools.
+- `ToolRouter` — local tool registration and invocation.
+- `MCPToolRouter` — external MCP tool routing.
+- `hooks` — extension points before and after tool calls.
+- `system_prompt` — dynamic or static prompt.
 
-这个结构的关键是：工具不直接拿完整 `Agent`，而是只拿 `ToolContext`。
+The key design decision: tools receive only `ToolContext`, never the full `Agent`.
 
 ## Agent Loop
 
-`Agent::agent_loop()` 是完整版本的主循环：
+`Agent::agent_loop()` is the complete main loop:
 
 ```text
 micro compact
-  -> 如果上下文超限，自动 compact
-  -> 构造模型请求
-  -> 合并本地工具和 MCP 工具 schema
-  -> 调用模型
-  -> 处理 prompt too long / transient error / max tokens
-  -> 如果没有 tool_use，结束本轮
-  -> 执行 tool_use
-  -> 回填 tool_result
-  -> 如果调用 compact 工具，手动 compact
-  -> 继续循环
+  → If context exceeds limit, auto compact
+  → Build model request
+  → Merge local tool schemas and MCP tool schemas
+  → Call model
+  → Handle prompt too long / transient error / max tokens
+  → If no tool_use, end this round
+  → Execute tool_use
+  → Push tool_result back
+  → If compact tool was invoked, manually compact
+  → Continue loop
 ```
 
-这仍然是 s01 的闭环，只是每个阶段都增加了真实 agent 需要的工程边界。
+This is still the s01 closed loop, but each stage now has the engineering boundaries a real agent needs.
 
 ## ToolRouter
 
-工具系统延续 s20 的结构，核心在 [`src/tool/mod.rs`](./src/tool/mod.rs)：
+The tool system continues the s20 structure, centered in [`src/tool/mod.rs`](./src/tool/mod.rs):
 
 ```rust
 pub trait Tool: Send + Sync {
@@ -170,7 +170,7 @@ pub trait Tool: Send + Sync {
 }
 ```
 
-`ToolRouter` 保存工具名到工具实现的映射：
+`ToolRouter` maintains a mapping from tool names to tool implementations:
 
 ```rust
 pub struct ToolRouter {
@@ -178,7 +178,7 @@ pub struct ToolRouter {
 }
 ```
 
-本地工具通过链式注册：
+Local tools register via chaining:
 
 ```rust
 ToolRouter::new()
@@ -188,11 +188,11 @@ ToolRouter::new()
     .route(WorktreeRunTool)
 ```
 
-每个工具使用强类型输入，并通过 `schemars` 生成模型可见的 `input_schema`。这样 schema 和 Rust 输入类型保持同源。
+Each tool uses strongly-typed input and generates model-visible `input_schema` via `schemars`. This keeps schemas and Rust input types in sync.
 
 ## ToolContext
 
-`ToolContext` 是工具层的依赖注入对象：
+`ToolContext` is the dependency injection object for the tool layer:
 
 ```rust
 pub struct ToolContext {
@@ -207,53 +207,53 @@ pub struct ToolContext {
 }
 ```
 
-它只包含工具执行需要的业务依赖，不包含：
+It contains only the business dependencies tools need to execute. It does not include:
 
 - LLM client
-- 对话上下文
-- 权限策略
-- recovery 状态
-- hooks
+- Conversation context
+- Permission policy
+- Recovery state
+- Hooks
 
-这些属于 agent runtime。这个边界能避免工具层反向控制整个 agent。
+These belong to the agent runtime. This boundary prevents the tool layer from inversely controlling the entire agent.
 
-## 本地工具
+## Local Tools
 
-`toolset()` 注册完整工具集：
+`toolset()` registers the complete tool set:
 
-- 基础工具：`add`、`bash`、`read_file`、`write_file`、`edit_file`
-- skill：`load_skill`
-- memory：`save_memory`
-- compact：`compact`
-- subagent：`task`
-- task：`task_create`、`task_get`、`task_list`、`task_update`
-- background：`background_run`、`background_check`
-- cron：`cron_create`、`cron_delete`、`cron_list`
-- team：`spawn_teammate`、`list_teammates`、`send_message`、`broadcast`、`read_inbox`、`plan_approval`、`shutdown_request`、`shutdown_response`
-- worktree：`worktree_create`、`worktree_list`、`worktree_status`、`worktree_run`、`worktree_events`
+- Basic: `add`, `bash`, `read_file`, `write_file`, `edit_file`
+- Skill: `load_skill`
+- Memory: `save_memory`
+- Compact: `compact`
+- Subagent: `task`
+- Task: `task_create`, `task_get`, `task_list`, `task_update`
+- Background: `background_run`, `background_check`
+- Cron: `cron_create`, `cron_delete`, `cron_list`
+- Team: `spawn_teammate`, `list_teammates`, `send_message`, `broadcast`, `read_inbox`, `plan_approval`, `shutdown_request`, `shutdown_response`
+- Worktree: `worktree_create`, `worktree_list`, `worktree_status`, `worktree_run`, `worktree_events`
 
-subagent 使用单独的 `subagent_toolset()`，只开放：
+Subagents use a separate `subagent_toolset()`, which only exposes:
 
 - `bash`
 - `read_file`
 - `write_file`
 - `edit_file`
 
-这样子代理可以独立探索和修改文件，但不会递归创建新的 team、cron、background 或 worktree 控制面。
+This allows subagents to independently explore and modify files without recursively creating new teams, cron jobs, background tasks, or worktree control planes.
 
 ## Store
 
-完整版本新增了一个重要抽象：[`src/store.rs`](./src/store.rs)。
+The complete version introduces an important abstraction: [`src/store.rs`](./src/store.rs).
 
-Store 层只处理持久化文件读写，不表达业务规则：
+The Store layer handles only persistent file I/O and does not express business rules:
 
-- `StoreRoot`：表示 `.claude` 状态根目录，并限制路径不能逃出 root。
-- `Store<T>`：表示一个 typed JSON 文件，也支持 JSONL append/read_all。
-- `CollectionStore<T>`：表示一组 typed JSON 文件。
+- `StoreRoot` — represents the `.claude` state root directory and enforces paths stay within root.
+- `Store<T>` — represents a typed JSON file, also supports JSONL append/read_all.
+- `CollectionStore<T>` — represents a set of typed JSON files.
 
-Domain manager 持有 store，并暴露业务方法。
+Domain managers hold stores and expose business methods.
 
-例如 task：
+Example — tasks:
 
 ```rust
 pub struct TaskManager {
@@ -262,7 +262,7 @@ pub struct TaskManager {
 }
 ```
 
-外部只调用：
+External code only calls:
 
 ```rust
 task_manager.create(...)
@@ -270,11 +270,11 @@ task_manager.update(...)
 task_manager.list(...)
 ```
 
-调用方不需要知道 task 文件如何命名，也不应该直接操作 `CollectionStore<TaskRecord>`。
+Callers don't need to know how task files are named, nor should they directly manipulate `CollectionStore<TaskRecord>`.
 
-## 状态目录
+## State Directory
 
-默认状态根目录是当前工作区的 `.claude`：
+The default state root is `.claude` in the current workspace:
 
 ```text
 .claude/
@@ -297,222 +297,222 @@ task_manager.list(...)
     index.json
 ```
 
-这些文件是 agent harness 的 durable state。它们不依赖当前模型上下文，因此可以支持跨轮次恢复和查询。
+These files form the agent harness's durable state. They don't depend on the current model context, enabling cross-session recovery and queries.
 
-## Domain Manager
+## Domain Managers
 
-完整版本把有明确业务语义的状态都收进 manager。
+The complete version consolidates all state with clear business semantics into managers.
 
-`TaskManager`：
+`TaskManager`:
 
-- 创建任务。
-- 查询任务。
-- 更新状态、owner 和依赖。
-- 完成任务时清理依赖。
+- Create tasks.
+- Query tasks.
+- Update status, owner, and dependencies.
+- Clean up dependencies on task completion.
 
-`BackgroundManager`：
+`BackgroundManager`:
 
-- 启动后台命令。
-- 保存后台任务状态。
-- 查询任务输出和退出状态。
+- Launch background commands.
+- Persist background task state.
+- Query task output and exit status.
 
-`CronScheduler`：
+`CronScheduler`:
 
-- 创建定时任务。
-- 删除定时任务。
-- 列出计划。
+- Create scheduled tasks.
+- Delete scheduled tasks.
+- List schedule.
 
-`TeammateManager`：
+`TeammateManager`:
 
-- 保存 teammate 配置。
-- 发送消息和广播。
-- 读取 inbox。
-- 发送 plan approval / shutdown 这类 protocol request。
+- Save teammate configs.
+- Send messages and broadcasts.
+- Read inboxes.
+- Send protocol requests like plan approval and shutdown.
 
-`WorktreeManager`：
+`WorktreeManager`:
 
-- 创建 git worktree。
-- 列出 worktree。
-- 查看状态。
-- 在 worktree 内执行命令。
-- 记录 worktree events。
+- Create git worktrees.
+- List worktrees.
+- Check status.
+- Execute commands inside worktrees.
+- Record worktree events.
 
-Store 负责“怎么落盘”，manager 负责“这件业务应该怎么变化”。
+Store is responsible for "how to persist." Manager is responsible for "how this business domain should change."
 
 ## Permission
 
-权限系统在 [`src/permission.rs`](./src/permission.rs)，执行工具前统一检查。
+The permission system is in [`src/permission.rs`](./src/permission.rs). Every tool execution is checked before dispatch.
 
-模式包括：
+Modes:
 
-- `Default`：读操作允许，写操作和高危操作询问。
-- `Plan`：只读操作允许，写操作拒绝。
-- `Auto`：读操作和非高危写操作允许，高危操作询问。
+- `Default` — allow reads, ask for writes and high-risk operations.
+- `Plan` — allow reads, deny writes.
+- `Auto` — allow reads and non-high-risk writes, ask for high-risk operations.
 
-权限判断发生在 tool dispatch 之前：
+Permission checks happen before tool dispatch:
 
 ```text
 tool_use
-  -> PermissionManager::check
-  -> allow / ask / deny
-  -> ToolRouter 或 MCPToolRouter
+  → PermissionManager::check
+  → allow / ask / deny
+  → ToolRouter or MCPToolRouter
 ```
 
-因此 `PermissionManager` 属于 `AgentRuntime`，不是 `ToolContext`。
+Therefore `PermissionManager` belongs to `AgentRuntime`, not `ToolContext`.
 
-## Hook
+## Hooks
 
-hook 定义在 [`src/hook.rs`](./src/hook.rs)，当前保留三类：
+Hooks are defined in [`src/hook.rs`](./src/hook.rs), currently with three types:
 
 - `SessionStart`
 - `PreToolUse`
 - `PostToolUse`
 
-主循环已经接入 `PreToolUse` 和 `PostToolUse`：
+The main loop has wired up `PreToolUse` and `PostToolUse`:
 
 ```text
 PreToolUse
-  -> permission check
-  -> execute tool
-  -> PostToolUse
-  -> tool_result
+  → permission check
+  → execute tool
+  → PostToolUse
+  → tool_result
 ```
 
-`PreToolUse` 可以修改工具输入或阻断调用。`PostToolUse` 可以修改工具输出或阻断结果返回。
+`PreToolUse` can modify tool input or block the call. `PostToolUse` can modify tool output or block the result.
 
-## Compact 和 Recovery
+## Compaction & Recovery
 
-完整版本同时处理上下文压缩和错误恢复。
+The complete version handles both context compaction and error recovery.
 
-compact 机制包括：
+Compaction mechanisms:
 
-- 每轮前执行 `micro_compact`。
-- 上下文估算超过 `CONTEXT_LIMIT` 时自动 compact。
-- `compact` 工具触发手动 compact。
-- compact 前写入 transcript。
-- 大的 `bash` 输出会落盘并返回预览。
-- 最近读取文件会被记录到 compact prompt 中。
+- Run `micro_compact` before each round.
+- Auto-compact when estimated context exceeds `CONTEXT_LIMIT`.
+- `compact` tool triggers manual compaction.
+- Write transcript before compaction.
+- Large `bash` output is persisted to disk with preview.
+- Recent files read are recorded in the compaction prompt.
 
-recovery 机制包括：
+Recovery mechanisms:
 
-- prompt too long：触发 compact 后重试。
-- transient transport error：指数退避后重试。
-- max tokens：注入 continuation message 继续生成。
+- Prompt too long → compact then retry.
+- Transient transport error → exponential backoff then retry.
+- Max tokens → inject continuation message to resume generation.
 
-这些逻辑让长任务不至于因为上下文过长或临时网络问题直接中断。
+These mechanisms prevent long tasks from being terminated by oversized context or temporary network issues.
 
 ## System Prompt
 
-动态 system prompt 由 [`src/prompt.rs`](./src/prompt.rs) 和 [`src/system_prompt_template.md`](./src/system_prompt_template.md) 生成。
+The dynamic system prompt is generated by [`src/prompt.rs`](./src/prompt.rs) and [`src/system_prompt_template.md`](./src/system_prompt_template.md).
 
-它包含：
+It contains:
 
-- agent 角色和工作目录。
-- 行为约束。
-- 可用技能摘要。
-- memory 内容。
-- `CLAUDE.md` 指令。
-- 当前日期、工作目录、模型、平台等动态上下文。
-- memory 使用指引。
+- Agent role and working directory.
+- Behavioral constraints.
+- Summary of available skills.
+- Memory content.
+- `CLAUDE.md` instructions.
+- Dynamic context: current date, working directory, model, platform.
+- Memory usage guidance.
 
-主 agent 每次 loop 会构造动态 prompt。subagent 使用静态 prompt，避免继承主 agent 的完整上下文。
+The main agent builds a dynamic prompt each loop. Subagents use a static prompt to avoid inheriting the main agent's full context.
 
-## Skill 和 Memory
+## Skills & Memory
 
-skill 系统扫描：
+The skill system scans:
 
 ```text
 skills/*/SKILL.md
 ```
 
-启动时只把技能摘要放进 system prompt，需要时通过 `load_skill` 加载全文。
+At startup, only skill summaries are placed in the system prompt. Full content is loaded on demand via `load_skill`.
 
-memory 系统使用 `.claude/memory`，通过 `save_memory` 写入偏好、事实、反馈和引用。system prompt 会加载 memory summary，让 agent 跨轮次保留重要信息。
+The memory system uses `.claude/memory`, writing preferences, facts, feedback, and references via `save_memory`. The system prompt loads a memory summary, allowing the agent to retain important information across sessions.
 
 ## MCP
 
-MCP 接入在 [`src/mcp.rs`](./src/mcp.rs)。
+MCP integration is in [`src/mcp.rs`](./src/mcp.rs).
 
-启动时扫描：
+On startup, it scans:
 
 ```text
 .claude-plugin/plugin.json
 ```
 
-manifest 中的 `mcpServers` 会被启动并连接。每个外部工具会转换成模型可见的 tool spec，名称格式是：
+MCP servers declared in the manifest are launched and connected. Each external tool is converted to a model-visible tool spec with the naming format:
 
 ```text
 mcp__<plugin>__<server>__<tool>
 ```
 
-执行时：
+At execution time:
 
-- 普通工具走 `ToolRouter`。
-- `mcp__` 前缀工具走 `MCPToolRouter`。
+- Regular tools are routed through `ToolRouter`.
+- `mcp__`-prefixed tools are routed through `MCPToolRouter`.
 
-两类工具都会先经过权限判断，再把结果作为 `tool_result` 回填到上下文。
+Both tool categories pass through permission checks before execution, and results are pushed back into context as `tool_result`.
 
-## Worktree 和 Subagent
+## Worktree & Subagents
 
-`task` 工具可以启动 fresh-context subagent。subagent 拥有自己的 `Agent` 实例和独立上下文，但共享 `ToolContext` 中的基础依赖。
+The `task` tool can launch fresh-context subagents. A subagent has its own `Agent` instance and independent context but shares the base dependencies in `ToolContext`.
 
-worktree 工具让 agent 可以把任务放进独立 git worktree：
+Worktree tools let the agent place tasks into isolated git worktrees:
 
 ```text
 worktree_create
-  -> task tool 启动 subagent
-  -> worktree_run / worktree_status
-  -> worktree_events
+  → task tool launches subagent
+  → worktree_run / worktree_status
+  → worktree_events
 ```
 
-当前 `sfull` 的 worktree 实现是整合版的最小能力，重点是让完整 runtime 中具备隔离执行入口，而不是实现完整分支合并流程。
+The current `sfull` worktree implementation is a minimal integration, focused on providing the isolated execution entry point in the complete runtime — not a full branch merge flow.
 
-## 和前面章节的关系
+## Relationship to Previous Chapters
 
-`sfull` 可以看作一条完整 Rust agent harness 路线的落点：
+`sfull` represents the culmination of a complete Rust agent harness roadmap:
 
-- s01-s04：agent loop、工具、计划、subagent。
-- s05-s08：skill、compact、permission、hook。
-- s09-s14：memory、prompt、recovery、task、background、cron。
-- s15-s18：team、protocol、autonomous worker、worktree isolation。
-- s19-s20：MCP plugin 和 tool router refactor。
+- s01–s04: agent loop, tools, plans, subagents.
+- s05–s08: skills, compaction, permissions, hooks.
+- s09–s14: memory, prompts, recovery, tasks, background, cron.
+- s15–s18: team, protocols, autonomous workers, worktree isolation.
+- s19–s20: MCP plugins and tool router refactoring.
 
-在 `sfull` 中，这些能力不再分散在独立 crate，而是通过统一的 runtime、router、context 和 store 组织起来。
+In `sfull`, these capabilities are no longer scattered across independent crates — they're organized through a unified runtime, router, context, and store.
 
-## 本章的局限
+## Limitations
 
-- `ToolContext` 仍然是单一类型，root agent、subagent、teammate 没有各自独立 context。
-- team protocol 是最小消息协议，尚未实现完整 autonomous teammate runtime。
-- worktree 只覆盖创建、状态、运行和事件，不负责 merge / rebase / conflict。
-- Store 没有跨进程文件锁。
-- MCP 只覆盖 stdio server 和 tool call，没有 resources、prompts、OAuth 和自动重连。
-- hooks 有类型和注册方法，但还没有完整配置文件驱动。
+- `ToolContext` is still a single type; root agent, subagent, and teammate don't have independent contexts.
+- Team protocol is a minimal message protocol; a full autonomous teammate runtime is not yet implemented.
+- Worktree covers creation, status, execution, and events only — no merge/rebase/conflict handling.
+- Store has no cross-process file locking.
+- MCP covers stdio servers and tool calls only — no resources, prompts, OAuth, or auto-reconnect.
+- Hooks have types and registration methods but no full config-file-driven system.
 
-## 推荐阅读顺序
+## Recommended Reading Order
 
-1. [`src/main.rs`](./src/main.rs)：理解初始化顺序。
-2. [`src/lib.rs`](./src/lib.rs)：理解完整 agent loop。
-3. [`src/tool/mod.rs`](./src/tool/mod.rs)：理解 ToolRouter 和 ToolContext。
-4. [`src/store.rs`](./src/store.rs)：理解 StoreRoot / Store / CollectionStore。
-5. [`src/permission.rs`](./src/permission.rs)、[`src/compact.rs`](./src/compact.rs)、[`src/recovery.rs`](./src/recovery.rs)：理解运行时控制。
-6. [`src/task.rs`](./src/task.rs)、[`src/team.rs`](./src/team.rs)、[`src/worktree.rs`](./src/worktree.rs)：理解 domain manager。
-7. [`src/mcp.rs`](./src/mcp.rs)：理解外部 MCP 工具如何进入同一条工具链路。
+1. [`src/main.rs`](./src/main.rs) — understand the initialization sequence.
+2. [`src/lib.rs`](./src/lib.rs) — understand the complete agent loop.
+3. [`src/tool/mod.rs`](./src/tool/mod.rs) — understand ToolRouter and ToolContext.
+4. [`src/store.rs`](./src/store.rs) — understand StoreRoot / Store / CollectionStore.
+5. [`src/permission.rs`](./src/permission.rs), [`src/compact.rs`](./src/compact.rs), [`src/recovery.rs`](./src/recovery.rs) — understand runtime controls.
+6. [`src/task.rs`](./src/task.rs), [`src/team.rs`](./src/team.rs), [`src/worktree.rs`](./src/worktree.rs) — understand domain managers.
+7. [`src/mcp.rs`](./src/mcp.rs) — understand how external MCP tools enter the same tool pipeline.
 
-## 验证
+## Verification
 
-检查完整版本：
+Check the complete version:
 
 ```bash
 cargo check -p tact
 ```
 
-运行测试：
+Run tests:
 
 ```bash
 cargo test -p tact
 ```
 
-检查整个 workspace：
+Check the entire workspace:
 
 ```bash
 cargo check --workspace

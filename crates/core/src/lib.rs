@@ -1,6 +1,7 @@
-// Agent 核心模块
-// 负责接收用户任务，调用 OpenAI API 生成执行计划，并在沙箱中逐步执行。
-// 通过 Channel 与 TUI 模块通信，实时上报执行状态。
+// Agent core module
+// Receives user tasks, calls the OpenAI API to generate execution plans,
+// and executes them step by step inside a sandbox.
+// Communicates with the TUI module over channels, reporting execution status in real time.
 
 use anyhow::{Result, anyhow};
 use async_openai::{
@@ -21,27 +22,27 @@ use tokio::sync::oneshot;
 use tokio::time::{Duration, sleep, timeout};
 use tools::Sandbox;
 
-/// 步骤执行状态。
+/// Execution status of a step.
 #[derive(Debug, Clone)]
 pub enum StepStatus {
     Success,
     Failed,
 }
 
-/// 步骤执行结果的结构化信息。
+/// Structured result of a step execution.
 #[derive(Debug, Clone)]
 pub struct StepResult {
     pub tool: String,
     pub arg_summary: String,
     pub status: StepStatus,
     pub message: String,
-    /// 附加详情，如文件写入的完整内容或命令输出的原始文本。
+    /// Additional details, e.g. full content of a written file or raw command output.
     pub detail: Option<String>,
-    /// 工具执行耗时（毫秒）。None 表示非工具执行步骤。
+    /// Tool execution duration in milliseconds. None for non-tool steps.
     pub duration_ms: Option<u64>,
 }
 
-/// 模型调用参数信息。
+/// Parameters for a model API call.
 #[derive(Debug, Clone)]
 pub struct ModelCallParams {
     pub model: String,
@@ -51,20 +52,20 @@ pub struct ModelCallParams {
     pub extra_body: Option<String>,
 }
 
-/// 错误的分类，让 TUI 能够区分需要展示为 ❌ Error 的致命错误
-/// 和应作为 Info 提示的非致命情况。
+/// Error classification — lets the TUI distinguish fatal errors (displayed as ❌ Error)
+/// from non-fatal situations (shown as Info).
 #[derive(Debug, Clone)]
 pub enum AgentErrorKind {
-    /// 余额查询失败（网络或 API 错误）
+    /// Balance query failed (network or API error)
     BalanceQueryFailed(String),
-    /// 余额查询仅 DeepSeek provider 支持
+    /// Balance query is only supported for DeepSeek provider
     BalanceNotSupported,
-    /// 通用错误（兜底）
+    /// Generic error (catch-all)
     Other(String),
 }
 
 impl AgentErrorKind {
-    /// 返回人类可读的错误描述。
+    /// Returns a human-readable error description.
     pub fn display(&self) -> &str {
         match self {
             AgentErrorKind::BalanceQueryFailed(e) => e,
@@ -76,111 +77,111 @@ impl AgentErrorKind {
     }
 }
 
-/// Agent 向 TUI 推送的状态更新消息。
+/// Status update messages sent from the Agent to the TUI.
 #[derive(Debug)]
 pub enum AgentUpdate {
-    /// 计划已生成，附带步骤列表
+    /// Plan generated, with list of steps
     PlanGenerated(Vec<PlanStep>),
-    /// 第 idx 步开始执行
+    /// Step `idx` has started execution
     StepStarted(usize),
-    /// 第 idx 步执行成功，附带结构化结果
+    /// Step `idx` succeeded, with structured result
     StepFinished(usize, StepResult),
-    /// 第 idx 步执行失败，附带错误信息
+    /// Step `idx` failed, with error message
     StepFailed(usize, String),
-    /// 需要用户审批：提示文本、步骤索引、审批通道（true=同意，false=拒绝）
+    /// Requires user approval: prompt text, step index, approval channel (true=accept, false=reject)
     NeedApproval(String, usize, oneshot::Sender<bool>),
-    /// 整个任务完成
+    /// The entire task is complete
     TaskComplete(String),
-    /// Agent 错误，携带分类便于 TUI 决定展示方式
+    /// Agent error, with classification for the TUI to decide display style
     Error(AgentErrorKind),
-    /// Token 消耗统计
+    /// Token usage stats
     TokenUsage {
         prompt: u32,
         completion: u32,
         total: u32,
-        /// DeepSeek KV cache 命中的 prompt token 数（非 DeepSeek provider 时为 0）
+        /// DeepSeek KV cache hit prompt tokens (0 for non-DeepSeek providers)
         prompt_cache_hit_tokens: u32,
-        /// DeepSeek KV cache 未命中的 prompt token 数
+        /// DeepSeek KV cache miss prompt tokens
         prompt_cache_miss_tokens: u32,
     },
-    /// 账户余额信息（仅 DeepSeek）
+    /// Account balance info (DeepSeek only)
     Balance(BalanceInfo),
-    /// 模型调用参数（名称、max_tokens、thinking budget 等）
+    /// Model call parameters (name, max_tokens, thinking budget, etc.)
     ModelInfo(ModelCallParams),
-    /// 纯信息提示（不改变状态）
+    /// Informational notice (does not change state)
     Info(String),
-    /// 动态追加一个步骤到已有计划中（不重置选择状态）
+    /// Dynamically append a step to the existing plan (does not reset selection state)
     StepAdded(PlanStep),
-    /// 请求用户从选项列表中选择一个，返回选项索引（None 表示取消）
+    /// Request user to choose from a list of options; returns option index (None = cancelled)
     RequestSelect {
         prompt: String,
         options: Vec<String>,
         respond: oneshot::Sender<Option<usize>>,
     },
-    /// 流式输出文本片段（实时追加到 Log）
+    /// Streaming output text fragment (appended to Log in real time)
     StreamChunk(String),
-    /// 流式 thinking / reasoning 内容片段
+    /// Streaming thinking / reasoning content fragment
     ThinkingChunk(String),
 }
 
-/// TUI 向 Agent 发送的用户命令。
+/// User commands sent from the TUI to the Agent.
 #[derive(Debug)]
 pub enum UserCommand {
-    /// 提交一个新的自然语言任务
+    /// Submit a new natural-language task
     SubmitTask(String),
-    /// 取消当前任务（暂未实现完整取消逻辑）
+    /// Cancel the current task (full cancellation logic not yet implemented)
     Cancel,
-    /// 查询账户余额（仅 DeepSeek）
+    /// Query account balance (DeepSeek only)
     QueryBalance,
 }
 
-/// 执行计划中的单个步骤。
+/// A single step in the execution plan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStep {
-    /// 步骤描述（人类可读）
+    /// Human-readable step description
     pub description: String,
-    /// 工具名称：read_file / write_file / run_command
+    /// Tool name: read_file / write_file / run_command
     pub tool: String,
-    /// 工具参数（键值对）
+    /// Tool arguments (key-value pairs)
     pub args: HashMap<String, String>,
-    /// 执行前是否需要用户手动审批
+    /// Whether user manual approval is required before execution
     pub need_approval: bool,
-    /// 执行后的输出（由 TUI 填充，JSON 反序列化时默认为 None）
+    /// Output after execution (populated by TUI; defaults to None on JSON deserialization)
     #[serde(default)]
     pub output: Option<String>,
 }
 
-/// DeepSeek 账户余额信息的单个币种条目。
+/// A single currency entry in DeepSeek account balance info.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BalanceEntry {
-    /// 货币类型：CNY 或 USD
+    /// Currency type: CNY or USD
     pub currency: String,
-    /// 总可用余额（赠金 + 充值）
+    /// Total available balance (granted + topped up)
     pub total_balance: String,
-    /// 未过期赠金余额
+    /// Unexpired granted balance
     pub granted_balance: String,
-    /// 充值余额
+    /// Topped-up balance
     pub topped_up_balance: String,
 }
 
-/// DeepSeek 账户余额查询结果。
+/// DeepSeek account balance query result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BalanceInfo {
-    /// 账户是否有可用余额
+    /// Whether the account has available balance
     pub is_available: bool,
-    /// 各币种余额明细
+    /// Per-currency balance details
     pub balance_infos: Vec<BalanceEntry>,
 }
 
-/// 智能体结构体，持有沙箱、OpenAI 客户端及通信通道。
+/// Agent struct — holds the sandbox, OpenAI client, and communication channels.
 pub struct Agent {
     sandbox: Arc<Sandbox>,
     openai_client: Client<OpenAIConfig>,
-    /// 向 TUI 发送状态更新的通道
+    /// Channel for sending status updates to the TUI
     ui_tx: UnboundedSender<AgentUpdate>,
-    /// 接收 TUI 发来的用户命令
+    /// Channel for receiving user commands from the TUI
     cmd_rx: UnboundedReceiver<UserCommand>,
-    /// 任务取消标志，TUI 设置后 Agent 在执行间隙检查并提前退出
+    /// Task cancellation flag — set by the TUI, checked by the Agent between steps
     cancel_flag: Arc<AtomicBool>,
 }
 
@@ -189,9 +190,9 @@ impl Agent {
         ui_tx: UnboundedSender<AgentUpdate>,
         cmd_rx: UnboundedReceiver<UserCommand>,
     ) -> Self {
-        // 以当前目录为工作空间，构建沙箱
+        // Use the current directory as workspace and build the sandbox
         let workspace = PathBuf::from(".");
-        // 允许执行的命令白名单
+        // Allowlist of permitted commands
         let allowed_commands = vec![
             "cargo".to_string(),
             "git".to_string(),
@@ -209,7 +210,7 @@ impl Agent {
         }
     }
 
-    /// Agent 主循环：持续监听用户命令，直到通道关闭。
+    /// Agent main loop: continuously listens for user commands until the channel closes.
     pub async fn run(mut self) -> Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
@@ -236,11 +237,11 @@ impl Agent {
         Ok(())
     }
 
-    /// 处理单个任务：生成计划 -> 逐歩执行 -> 上报结果。
+    /// Handle a single task: generate plan → execute step by step → report results.
     async fn handle_task(&self, task: String) -> Result<()> {
         self.cancel_flag.store(false, Ordering::Relaxed);
 
-        // 1. 调用 LLM 生成执行计划
+        // 1. Call LLM to generate an execution plan
         let plan = self.generate_plan(&task).await?;
         if self.cancel_flag.load(Ordering::Relaxed) {
             self.ui_tx.send(AgentUpdate::StepFailed(
@@ -251,7 +252,7 @@ impl Agent {
         }
         self.ui_tx.send(AgentUpdate::PlanGenerated(plan.clone()))?;
 
-        // 2. 按顺序执行每一步
+        // 2. Execute each step sequentially
         for (idx, step) in plan.iter().enumerate() {
             if self.cancel_flag.load(Ordering::Relaxed) {
                 self.ui_tx
@@ -260,12 +261,12 @@ impl Agent {
             }
             self.ui_tx.send(AgentUpdate::StepStarted(idx))?;
 
-            // 若步骤标记为需审批，则通过 oneshot channel 等待 TUI 的用户确认
+            // If the step requires approval, wait for user confirmation via a oneshot channel
             if step.need_approval {
                 let (tx, mut rx) = oneshot::channel();
                 self.ui_tx
                     .send(AgentUpdate::NeedApproval(step.description.clone(), idx, tx))?;
-                // 每 100ms 轮询一次，兼顾取消响应与 CPU 占用
+                // Poll every 100ms, balancing cancel responsiveness and CPU usage
                 let approved = loop {
                     if self.cancel_flag.load(Ordering::Relaxed) {
                         self.ui_tx.send(AgentUpdate::StepFailed(
@@ -292,7 +293,7 @@ impl Agent {
                 }
             }
 
-            // 在沙箱中执行工具调用
+            // Execute the tool call inside the sandbox
             let result = self.execute_step(step).await;
             match result {
                 Ok(output) => {
@@ -326,7 +327,7 @@ impl Agent {
                     return Ok(());
                 }
             }
-            // 每步之间短暂停顿，便于 TUI 展示动画效果
+            // Brief pause between steps so the TUI can show animation
             sleep(Duration::from_millis(200)).await;
         }
 
@@ -336,7 +337,7 @@ impl Agent {
         Ok(())
     }
 
-    /// 调用 OpenAI ChatCompletion API，要求模型返回固定格式的 JSON 计划数组。
+    /// Call the OpenAI ChatCompletion API, requesting a fixed-format JSON plan array from the model.
     async fn generate_plan(&self, task: &str) -> Result<Vec<PlanStep>> {
         let model = "gpt-3.5-turbo".to_string();
         let _ = self.ui_tx.send(AgentUpdate::ModelInfo(ModelCallParams {
@@ -395,7 +396,7 @@ impl Agent {
             .first()
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
-        // 清理 LLM 可能包裹的 markdown 代码块
+        // Clean up any markdown code blocks the LLM may have wrapped the output in
         let cleaned = content
             .trim()
             .trim_start_matches("```json")
@@ -406,7 +407,7 @@ impl Agent {
         Ok(plan)
     }
 
-    /// 根据步骤中指定的工具，在沙箱中执行具体操作。
+    /// Execute a specific tool operation in the sandbox based on the step specification.
     async fn execute_step(&self, step: &PlanStep) -> Result<String> {
         match step.tool.as_str() {
             "read_file" => {

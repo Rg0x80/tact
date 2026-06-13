@@ -1,6 +1,7 @@
-/// 国际化模块 — 支持英文和中文切换，与主题切换机制一致。
+//! Internationalization module — supports English and Chinese toggling,
+//! consistent with the theme switching mechanism.
 
-/// 语言枚举。
+/// Language enum.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Language {
     English,
@@ -12,14 +13,14 @@ impl Language {
         &[Language::English, Language::Chinese]
     }
 
-    /// 循环切换到下一个语言。
+    /// Cycle to the next language.
     pub fn next(self) -> Self {
         let all = Self::all();
         let idx = all.iter().position(|t| *t == self).unwrap();
         all[(idx + 1) % all.len()]
     }
 
-    /// 返回语言的显示标签。
+    /// Returns the display label for the language.
     pub fn label(self) -> &'static str {
         match self {
             Language::English => "EN",
@@ -28,11 +29,12 @@ impl Language {
     }
 }
 
-/// 所有可翻译的 UI 字符串。
-/// 字段命名规则：
-///   带 `_tmpl` 后缀 = 含 `{}` 占位符的模板字符串，调用时用 format!() 填充。
-///   其他为静态文本。
-///   `_pl` 后缀 = 涉及复数形式的字符串（中文中一般可直接忽略复数后缀）。
+/// All translatable UI strings.
+///
+/// Naming conventions:
+///   `_tmpl` suffix = template strings with `{}` placeholders, filled via `format!()`.
+///   Others are static text.
+///   `_pl` suffix = strings involving plural forms (can generally be ignored in Chinese).
 #[allow(non_snake_case)]
 pub struct Messages {
     // ---- 面板标题 ----
@@ -193,7 +195,7 @@ pub struct Messages {
 }
 
 impl Messages {
-    /// 根据语言返回对应的字符串集合。
+    /// Returns the string set for the given language.
     pub fn by_language(lang: Language) -> Self {
         match lang {
             Language::English => Self::english(),
@@ -353,7 +355,7 @@ impl Messages {
         Self {
             log_title: " [日志] ",
             thinking_card_title: " 🧠 思考中 ({} 行) ",
-            thinking_card_title_pl: "", // 中文无复数形式
+            thinking_card_title_pl: "", // Chinese has no plural form
             thinking_card_bottom: " ↕ {}/{} 行 | 点击查看完整内容 ",
             diff_card_title: " +{} {} ",
             diff_card_bottom: " 双击查看完整代码 ",

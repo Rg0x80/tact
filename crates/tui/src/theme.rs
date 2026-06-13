@@ -1,9 +1,10 @@
-// 主题模块
-// 定义 TUI 支持的所有配色方案，每种主题包含背景、前景、强调色、警告色、错误色等。
+// Theme module
+// Defines all color schemes supported by the TUI. Each theme specifies background,
+// foreground, accent, warning, error, and other UI element colors.
 
 use ratatui::style::Color;
 
-/// 内置主题名称枚举。
+/// Built-in theme name enum.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ThemeName {
     Dark,
@@ -31,7 +32,7 @@ impl ThemeName {
             ThemeName::Japanese,
         ]
     }
-    /// 循环切换到下一个主题。
+    /// Cycle to the next theme.
     pub(super) fn next(&self) -> Self {
         let all = Self::all();
         let idx = all.iter().position(|t| t == self).unwrap();
@@ -39,26 +40,27 @@ impl ThemeName {
     }
 }
 
-/// 主题色彩配置，各字段对应 TUI 不同元素的颜色。
+/// Theme color configuration. Each field corresponds to a color used by
+/// a different TUI element.
 pub struct Theme {
     pub name: ThemeName,
-    pub bg: Color,            // 背景色
-    pub fg: Color,            // 前景色（默认文字）
-    pub accent: Color,        // 强调色（系统消息、提示）
-    pub warning: Color,       // 警告色（需审批、执行中）
-    pub error: Color,         // 错误色
-    pub success: Color,       // 成功色（用户输入、完成标记）
-    pub highlight: Color,     // 高亮色（选中项、搜索匹配背景）
-    pub border: Color,        // 边框色
-    pub status_bar_bg: Color, // 状态栏背景色
-    pub bottom_bar_bg: Color, // 底部栏背景色
-    pub bottom_bar_fg: Color, // 底部栏前景色
-    pub input_box_bg: Color,  // 输入框背景色
-    pub input_box_fg: Color,  // 输入框前景色
+    pub bg: Color,            // Background color
+    pub fg: Color,            // Foreground (default text)
+    pub accent: Color,        // Accent (system messages, prompts)
+    pub warning: Color,       // Warning (approval needed, executing)
+    pub error: Color,         // Error color
+    pub success: Color,       // Success (user input, completion markers)
+    pub highlight: Color,     // Highlight (selection, search match background)
+    pub border: Color,        // Border color
+    pub status_bar_bg: Color, // Status bar background
+    pub bottom_bar_bg: Color, // Bottom bar background
+    pub bottom_bar_fg: Color, // Bottom bar foreground
+    pub input_box_bg: Color,  // Input box background
+    pub input_box_fg: Color,  // Input box foreground
 }
 
 impl Theme {
-    /// 根据主题名称返回对应的色彩配置。
+    /// Returns the color configuration for the given theme name.
     pub(super) fn by_name(name: ThemeName) -> Self {
         match name {
             ThemeName::Dark => Self {

@@ -1,6 +1,8 @@
-// TUI 主模块
-// 负责初始化终端（raw mode + alternate screen）、驱动渲染循环、分发输入事件。
-// 将 Agent 状态更新与终端事件桥接到 App 状态和各子模块的渲染/处理函数。
+// TUI main module
+// Initializes the terminal (raw mode + alternate screen), drives the render loop,
+// and dispatches input events.
+// Bridges Agent status updates and terminal events to the App state and
+// submodule render/handler functions.
 
 mod handlers;
 mod i18n;
@@ -45,9 +47,9 @@ use tact_core::{AgentUpdate, UserCommand};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
 
-// ========== 主循环 ==========
+// ========== Main Loop ==========
 
-/// 返回 5~15 秒之间的随机间隔，避免余额查询被风控。
+/// Returns a random interval between 5–15 seconds to avoid rate-limiting on balance queries.
 fn random_balance_duration() -> Duration {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -56,13 +58,13 @@ fn random_balance_duration() -> Duration {
     Duration::from_secs(5 + (nanos % 11) as u64)
 }
 
-/// TUI 入口函数：初始化终端，启动事件循环，直到用户退出。
+/// TUI entry point: initializes the terminal, starts the event loop, runs until the user exits.
 pub async fn run_tui(
     agent_rx: UnboundedReceiver<AgentUpdate>,
     user_cmd_tx: UnboundedSender<UserCommand>,
     work_dir: PathBuf,
 ) -> Result<()> {
-    // 进入 raw mode，启用备用屏幕缓冲区，捕获鼠标事件
+    // Enter raw mode, enable the alternate screen buffer, capture mouse events
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
@@ -75,18 +77,18 @@ pub async fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // 初始化应用状态
+    // Initialize application state
     let mut app = App::new(agent_rx, user_cmd_tx.clone(), work_dir);
     app.add_startup_logo();
     let msgs = app.msgs();
     app.add_system_message(msgs.startup_welcome.to_string());
     app.add_system_message(msgs.startup_mode_hint.to_string());
 
-    // 记录上一次的终端尺寸，用于在尺寸变化时重新计算布局
+    // Record the previous terminal size so we can recompute layout on resize
     let term_size = terminal.size()?;
     let mut last_size = Rect::new(0, 0, term_size.width, term_size.height);
 
-    // 使用异步 EventStream 读取终端事件，无需独立阻塞线程
+    // Use an async EventStream to read terminal events — no dedicated blocking thread needed
     let (event_tx, mut event_rx) = unbounded_channel::<Event>();
     let mut event_stream = EventStream::new();
     tokio::spawn(async move {
@@ -100,20 +102,24 @@ pub async fn run_tui(
     let mut balance_timer: std::pin::Pin<Box<tokio::time::Sleep>> =
         Box::pin(tokio::time::sleep(random_balance_duration()));
     loop {
-        // 先处理所有 Agent 状态更新，确保渲染和事件处理使用一致的状态。
-        // 这很重要：close_active_thinking_block 等操作会在 messages 数组中插入行，
-        // 如果在渲染之后才处理这些更新，渲染阶段计算的 log_scroll.visual_start
-        // 就会与消息数组的实际状态不一致，导致鼠标点击映射到错误的行。
+        // Process all Agent status updates first, ensuring rendering and event handling
+        // use consistent state.
+        // This matters: operations like close_active_thinking_block insert rows into the
+        // messages array. If these updates were processed after rendering, the
+        // log_scroll.visual_start computed during rendering would be inconsistent with the
+        // actual message array, causing mouse clicks to map to wrong lines.
         while let Ok(update) = app.agent_rx.try_recv() {
             app.handle_agent_update(update);
         }
 
-        // 只在脏标记为 true 或处于 Done 状态时重绘，避免空闲时无意义的高频刷新。
-        // Done 状态在 2s 超时后转为 Idle，需要保持渲染以检查时钟。
+        // Only repaint when the dirty flag is true or in Done state, avoiding pointless
+        // high-frequency refreshes while idle.
+        // Done state transitions to Idle after 2s timeout; must keep rendering to check
+        // the clock.
         if app.dirty || matches!(app.status, Status::Done) {
             terminal.draw(|f| {
                 let size = f.area();
-                // 输入框高度随内容自动扩展（1~3 行内容 + 2 行边框）
+                // Input box height auto-expands with content (1–3 lines of content + 2 for border)
                 let input_lines = app.input.lines().count().max(1).min(3) as u16;
                 let input_height = input_lines + 2;
                 let bottom_height: u16 = if app.balance_info.is_some() { 3 } else { 2 };
@@ -156,11 +162,12 @@ pub async fn run_tui(
                     render_select_popup(f, size, &app);
                 }
             })?;
-            // 绘制完成后清除脏标记，下一帧仅在状态变化时重绘。
+            // Clear dirty flag after painting; next frame only repaints when state changes.
             app.dirty = false;
         }
 
-        // Done 状态高亮 2s 后自动恢复 Idle，避免一直盖住快捷键提示
+        // Done state highlight: auto-revert to Idle after 2s so shortcut hints aren't
+        // permanently hidden
         if let Status::Done = app.status {
             if let Some(done_time) = app.task_done_time {
                 if chrono::Local::now()
@@ -170,21 +177,21 @@ pub async fn run_tui(
                 {
                     app.status = Status::Idle;
                     app.task_done_time = None;
-                    app.dirty = true; // 状态栏需要重绘以显示 Idle
+                    app.dirty = true; // status bar needs repaint to show Idle
                 }
             }
         }
 
-        // flash_msg 3s 后自动消失
+        // flash_msg auto-clears after 3s
         if app.flash_msg.as_ref().map(|(_, t)| t.elapsed().as_secs() >= 3).unwrap_or(false) {
             app.flash_msg = None;
             app.dirty = true;
         }
 
-        // 自适应空闲轮询间隔：根据状态调整等待事件的超时时间。
-        // - Done 状态：200ms，频繁检查 2s 超时转 Idle
-        // - 脏标记置位：10ms，快速触发重新渲染
-        // - 完全空闲：1000ms，降低 CPU 唤醒频率
+        // Adaptive idle polling interval: adjust the event wait timeout based on state.
+        // - Done state: 200ms, frequently check the 2s → Idle transition
+        // - Dirty flag set: 10ms, quickly trigger a rerender
+        // - Fully idle: 1000ms, reduce CPU wake frequency
         let idle_ms = if matches!(app.status, Status::Done) || app.flash_msg.is_some() {
             200u64
         } else if app.dirty {
@@ -194,7 +201,7 @@ pub async fn run_tui(
         };
         tokio::select! {
             _ = balance_timer.as_mut() => {
-                // 定时查询 DeepSeek 余额（5~15 秒随机间隔）
+                // Periodic DeepSeek balance query (random 5–15 second interval)
                 let _ = user_cmd_tx.send(UserCommand::QueryBalance);
                 balance_timer = Box::pin(tokio::time::sleep(random_balance_duration()));
             }
@@ -204,7 +211,7 @@ pub async fn run_tui(
                         app.dirty = true;
                 match event {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        // 全局快捷键：任何输入模式下都生效
+                        // Global shortcuts: active in any input mode
                         if key.modifiers.contains(KeyModifiers::CONTROL) {
                             match key.code {
                                 KeyCode::Char('c') => {
@@ -227,7 +234,7 @@ pub async fn run_tui(
                                 _ => {}
                             }
                         } else if app.diff_popup.is_some() {
-                            // 文件内容弹窗的键盘处理
+                            // Keyboard handling for file diff popup
                             match key.code {
                                 KeyCode::Esc => {
                                     app.close_diff_popup();
@@ -244,7 +251,7 @@ pub async fn run_tui(
                                 _ => {}
                             }
                         } else if app.code_popup.is_some() {
-                            // 代码块弹窗的键盘处理
+                            // Keyboard handling for code block popup
                             match key.code {
                                 KeyCode::Esc => {
                                     app.close_code_popup();
@@ -259,7 +266,7 @@ pub async fn run_tui(
                                     app.code_popup_scroll_up();
                                 }
                                 KeyCode::Char('G') => {
-                                    // 跳到底部——用一个很大的值，渲染时会 clamp
+                                    // Jump to bottom — use a large value; rendering will clamp
                                     if let Some(ref mut p) = app.code_popup {
                                         p.scroll = u16::MAX;
                                     }
@@ -272,7 +279,7 @@ pub async fn run_tui(
                                 _ => {}
                             }
                         } else if app.thinking.popup.is_some() {
-                            // Thinking 弹窗的键盘处理
+                            // Keyboard handling for thinking popup
                             match key.code {
                                 KeyCode::Esc => {
                                     app.close_thinking_popup();
@@ -297,7 +304,7 @@ pub async fn run_tui(
                             app.show_help = false;
                             app.show_history = false;
                         } else {
-                            // === Konami Code 彩蛋检测 ===
+                            // === Konami Code easter egg detection ===
                             // ↑ ↑ ↓ ↓ ← → ← → b a
                             let konami_seq: &[KeyCode] = &[
                                 KeyCode::Up,
@@ -323,10 +330,10 @@ pub async fn run_tui(
                                 && key.code != KeyCode::Left
                                 && key.code != KeyCode::Right
                             {
-                                // 非方向键输入打断序列
+                                // Non-arrow key input interrupts the sequence
                                 app.konami_progress = 0;
                             }
-                            // 根据当前输入模式分发给对应的按键处理器
+                            // Dispatch to the key handler for the current input mode
                             match app.input_mode {
                                 InputMode::Normal => {
                                     handle_normal_mode(&mut app, key, &user_cmd_tx)
@@ -411,7 +418,7 @@ pub async fn run_tui(
                                     }
                                 } else if in_log {
                                     app.focused_panel = FocusedPanel::Log;
-                                    // 鼠标行号 → 视觉行 → 逻辑行，考虑折行
+                                    // Mouse row → visual line → logical line, accounting for wrapping
                                     let visual_base = app
                                         .log_scroll
                                         .visual_start
@@ -422,12 +429,12 @@ pub async fn run_tui(
                                         + mouse.row.saturating_sub(app.mouse.log_area.y + 1)
                                             as usize;
                                     let line_idx = app.logical_from_visual(visual_row);
-                                    // 计算点击在文本中的列位置（用于单词选择）
+                                    // Compute the column position within the text for word selection
                                     let col = mouse
                                         .column
                                         .saturating_sub(app.mouse.log_area.x + 1)
                                         as usize;
-                                    // 跟踪连续点击次数
+                                    // Track consecutive click count
                                     let now = std::time::Instant::now();
                                     let pos = (mouse.column, mouse.row);
                                     let is_same_click = app.mouse.last_click_pos == Some(pos)
@@ -444,7 +451,7 @@ pub async fn run_tui(
                                     app.mouse.last_click_time = Some(now);
                                     app.mouse.last_click_pos = Some(pos);
                                     if let Some(phys_idx) = app.visible_message_index(line_idx) {
-                                        // 检查点击是否落在折叠 thinking 卡片区域内
+                                        // Check if the click lands within a collapsed thinking card area
                                         let card_hit = app.thinking.blocks.iter().position(|b| {
                                             app.phys_to_logical_fast(b.title_idx)
                                                 .zip(app.phys_to_logical_fast(b.end_idx + 1))
@@ -455,18 +462,18 @@ pub async fn run_tui(
                                         if let Some(card_idx) = card_hit {
                                             if app.mouse.click_count == 1 {
                                                 app.mouse.last_click_card = Some(card_idx);
-                                                // 单击：记住卡片供双击打开，不选中文本
+                                                // Single click: remember the card for double-click open, don't select text
                                                 app.mouse.log_word_selection = None;
                                                 app.mouse.log_selection = None;
                                                 app.mouse.dragging_log = false;
                                             } else if app.mouse.click_count == 2
                                                 && app.mouse.last_click_card == Some(card_idx)
                                             {
-                                                // 双击：打开 thinking 弹窗
+                                                // Double click: open the thinking popup
                                                 let block = &app.thinking.blocks[card_idx];
                                                 app.open_thinking_popup(block.title_idx);
                                             } else if app.mouse.click_count >= 3 {
-                                                // 三击：选中整行文本
+                                                // Triple click: select entire line
                                                 app.mouse.log_word_selection = None;
                                                 app.mouse.log_selection = Some((line_idx, line_idx));
                                                 app.mouse.dragging_log = true;
@@ -474,7 +481,7 @@ pub async fn run_tui(
                                         } else {
                                             app.mouse.last_click_card = None;
                                         }
-                                        // 检查是否点击了 diff 块（文件写入预览）→ 双击打开弹窗
+                                        // Check if clicked on a diff block (file write preview) → double-click opens popup
                                         let diff_hit = app
                                             .diff_blocks
                                             .iter()
@@ -488,24 +495,24 @@ pub async fn run_tui(
                                         if let Some((diff_idx, block)) = diff_hit {
                                             if app.mouse.click_count == 1 {
                                                 app.mouse.last_click_diff = Some(diff_idx);
-                                                // 单击：记住 diff 块供双击打开，不选中文本
+                                                // Single click: remember diff block for double-click open, don't select text
                                                 app.mouse.log_word_selection = None;
                                                 app.mouse.log_selection = None;
                                                 app.mouse.dragging_log = false;
                                             } else if app.mouse.click_count == 2
                                                 && app.mouse.last_click_diff == Some(diff_idx)
                                             {
-                                                // 双击：打开 diff 弹窗
+                                                // Double click: open diff popup
                                                 app.open_diff_popup(block.start_idx);
                                             } else if app.mouse.click_count >= 3 {
-                                                // 三击：选中整行文本
+                                                // Triple click: select entire line
                                                 app.mouse.log_word_selection = None;
                                                 app.mouse.log_selection = Some((line_idx, line_idx));
                                                 app.mouse.dragging_log = true;
                                             }
                                         } else {
                                             app.mouse.last_click_diff = None;
-                                            // 检查是否点击了代码块 → 双击打开弹窗
+                                            // Check if clicked on a code block → double-click opens popup
                                             let code_hit = app
                                                 .code_blocks
                                                 .iter()
@@ -533,7 +540,7 @@ pub async fn run_tui(
                                                 }
                                             } else {
                                                 app.mouse.last_click_code = None;
-                                                // 检查是否点击了 thinking 标题行 → 打开弹窗
+                                                // Check if clicked on a thinking title line → open popup
                                                 let thinking_title = app
                                                     .thinking
                                                     .blocks
@@ -542,13 +549,13 @@ pub async fn run_tui(
                                                 if thinking_title {
                                                     app.open_thinking_popup(phys_idx);
                                                 } else if app.mouse.click_count == 2 {
-                                                    // 双击：选择单词
+                                                    // Double click: select word
                                                     app.mouse.log_selection = Some((line_idx, line_idx));
                                                     app.mouse.log_word_selection =
                                                         app.find_word_bounds(line_idx, col);
                                                     app.mouse.dragging_log = true;
                                                 } else if app.mouse.click_count >= 3 {
-                                                    // 三击：选择整行，若在代码块内则选中整个代码块
+                                                    // Triple click: select entire line; inside a code block, select the whole block
                                                     app.mouse.log_word_selection = None;
                                                     if let Some((cb_start, cb_end)) =
                                                         app.find_code_block_containing_logical(line_idx)
@@ -559,7 +566,7 @@ pub async fn run_tui(
                                                     }
                                                     app.mouse.dragging_log = true;
                                                 } else {
-                                                    // 单击：清除之前的选择，不选中文本
+                                                    // Single click: clear previous selection, no text selection
                                                     app.mouse.log_word_selection = None;
                                                     app.mouse.log_selection = None;
                                                     app.mouse.dragging_log = false;
@@ -616,10 +623,10 @@ pub async fn run_tui(
                         }
                     }
                     Event::Paste(data) => {
-                        // 粘贴文本（含换行）统一插入当前输入缓冲区
+                        // Paste text (including newlines) into the current input buffer
                         match app.input_mode {
                             InputMode::Insert => {
-                                // 多行编辑：保留换行，插入到光标位置
+                                // Multi-line edit: preserve newlines, insert at cursor position
                                 let before: String =
                                     app.input.chars().take(app.input_cursor).collect();
                                 let after: String =
@@ -628,7 +635,7 @@ pub async fn run_tui(
                                 app.input_cursor += data.chars().count();
                             }
                             InputMode::Search | InputMode::Palette => {
-                                // 单行命令行：换行替换为空格，追加到末尾
+                                // Single-line command: replace newlines with spaces, append to end
                                 let text: String = data.replace(['\n', '\r'], " ");
                                 app.cmd_line.push_str(&text);
                             }
@@ -639,10 +646,10 @@ pub async fn run_tui(
                     _ => {}
                 }
                     }
-                    None => break, // 事件通道已关闭
+                    None => break, // event channel closed
                 }
             }
-            _ = tokio::time::sleep(Duration::from_millis(idle_ms)) => {}  // 自适应空闲超时
+            _ = tokio::time::sleep(Duration::from_millis(idle_ms)) => {}  // adaptive idle timeout
         }
 
         if app.should_quit {
@@ -650,7 +657,7 @@ pub async fn run_tui(
         }
     }
 
-    // 退出前恢复终端状态
+    // Restore terminal state before exiting
     let exit_msg = app.msgs().exit_bye.to_string();
     drop(app);
     disable_raw_mode()?;

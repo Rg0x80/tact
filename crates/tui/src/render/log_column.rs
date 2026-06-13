@@ -3,13 +3,13 @@ use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 use super::renderable::Renderable;
 
-/// 日志列布局渲染器，负责将 Renderable 单元按视觉 offset 排列并绘制。
+/// Log column layout renderer: arranges and draws Renderable units by visual offset.
 pub(crate) struct LogColumnRenderer<'a> {
-    /// (视觉起始行, 渲染单元) 的列表，按视觉行递增排列。
+    /// List of (visual starting row, renderable unit), sorted by ascending visual row.
     cells: Vec<(usize, Box<dyn Renderable + 'a>)>,
-    /// 视口顶部视觉行号。
+    /// Viewport top visual row number.
     viewport_top: usize,
-    /// 视口可见行数。
+    /// Number of visible lines in the viewport.
     viewport_height: usize,
 }
 
@@ -43,7 +43,7 @@ impl Widget for LogColumnRenderer<'_> {
                 continue;
             }
 
-            // 计算可见部分
+            // Calculate visible portion
             let visible_start = (*vis_start).max(self.viewport_top);
             let visible_end = vis_end.min(viewport_bottom);
             let skip_lines = visible_start - vis_start;
@@ -52,7 +52,7 @@ impl Widget for LogColumnRenderer<'_> {
             let y = area.y + (visible_start - self.viewport_top) as u16;
             let cell_area = Rect::new(area.x, y, area.width, visible_lines as u16);
 
-            // 只渲染视口内的行：从 skip_lines 开始，最多 visible_lines 行
+            // Only render rows within the viewport: from skip_lines, at most visible_lines rows
             cell.render_partial(cell_area, buf, skip_lines);
         }
     }

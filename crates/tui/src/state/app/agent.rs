@@ -1,5 +1,4 @@
 use crate::state::*;
-use crate::render::render_md::{format_table, is_horizontal_rule, render_markdown_tui};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListState, ScrollbarState};
@@ -12,14 +11,15 @@ const STREAMING_INDICATOR: &str = " ▌";
 impl App {
     pub(crate) fn handle_agent_update(&mut self, update: AgentUpdate) {
         self.dirty = true;
-        // 关闭上一个 thinking 块：任何非 ThinkingChunk 的更新到来时，
-        // 意味着 LLM 已完成 thinking 阶段，后续输出不属 thinking 区域。
+        // Close the previous thinking block: when any non-ThinkingChunk update arrives,
+        // it means the LLM has finished the thinking phase and subsequent output
+        // does not belong to the thinking region.
         if !matches!(update, AgentUpdate::ThinkingChunk(_)) {
             self.flush_and_close_thinking();
         }
         match update {
             AgentUpdate::PlanGenerated(plan) => {
-                // 新任务开始，flush 残留流式行
+                // New task starts: flush leftover streaming lines
                 self.flush_stream_pending();
 
                 let plan_len = plan.len();
@@ -55,8 +55,8 @@ impl App {
                 self.plan.scroll_state = ScrollbarState::new(plan_len.saturating_sub(1));
             }
             AgentUpdate::StepStarted(idx) => {
-                // 先 flush 残留的流式内容（特别是 thinking 最后一行），
-                // 确保工具执行前的所有 LLM 输出已完整显示。
+                // Flush leftover streaming content first (especially the last thinking line),
+                // ensuring all LLM output before tool execution is fully displayed.
                 self.flush_stream_pending();
                 if let Status::Executing {
                     current_step,
@@ -68,13 +68,13 @@ impl App {
                 if let Some(step) = self.plan.steps.get(idx) {
                     let description = step.description.clone();
                     let msgs = self.msgs();
-                    // 在内容和工具调用之间插入一行空行作为视觉分隔
+                    // Insert a blank line between content and tool invocation as visual separator
                     self.add_system_message(msgs.step_started_tmpl.replace("{}", &description));
                 }
             }
             AgentUpdate::StepFinished(idx, result) => {
-                // 关闭当前步骤的 thinking 块，避免下一个步骤的
-                // ThinkingChunk 因 thinking_title_added 仍为 true 而跳过标题添加
+                // Close the thinking block for the current step, preventing the next step's
+                // ThinkingChunk from skipping the title because thinking_title_added is still true.
                 self.flush_stream_pending();
                 let msgs = self.msgs();
                 let icon = match result.status {
@@ -115,14 +115,15 @@ impl App {
                 let log_msg = format!("{}{}{}", log_msg, bytes_str, duration_str);
                 self.add_system_message(log_msg);
 
-                // 文件写入操作：插入占位行，由 render_log_panel 的 overlay 渲染 diff 块
+                // File write operation: insert placeholder lines; render_log_panel's overlay
+                // renders the diff block.
                 if result.tool == "write_file"
                     && let Some(content) = result.detail
                 {
                     let content_lines = content.lines().count();
                     let max_preview = 20usize;
                     let preview_count = content_lines.min(max_preview);
-                    // 占位行：顶部标题 + 预览内容 + 超出提示(可选) + 底部边框 + 分隔空行
+                    // Placeholders: top title + preview content + overflow hint (optional) + bottom border + separator blank
                     let more = if content_lines > max_preview { 1 } else { 0 };
                     let placeholder_count = 2 + preview_count + more + 1;
                     let start_idx = self.messages.len();
@@ -148,7 +149,7 @@ impl App {
                     }
                 }
 
-                // 把输出预览存入 plan step，供 Plan 面板查看
+                // Store output preview in plan step for Plan panel display
                 if let Some(step) = self.plan.steps.get_mut(idx) {
                     step.output = Some(result.message);
                 }
@@ -164,9 +165,10 @@ impl App {
                 self.status = Status::Idle;
                 self.task_start_time = None;
             }
-            // 处理需要用户审批的情况
+            // Handle cases requiring user approval
             AgentUpdate::NeedApproval(prompt, step_idx, tx) => {
-                // 先关闭活跃的 thinking 块，防止授权消息被卷入折叠区
+                // Close the active thinking block first, preventing approval messages
+                // from being captured inside a collapsed region.
                 self.flush_stream_pending();
                 let prompt_clone = prompt.clone();
                 self.status = Status::WaitingForUser {
@@ -179,11 +181,10 @@ impl App {
                 self.add_system_message(msgs.need_approval_tmpl.replace("{}", &prompt_clone));
             }
             AgentUpdate::TaskComplete(summary) => {
-                // 任务完成，flush 残留流式行
+                // Task complete: flush leftover streaming lines
                 self.flush_stream_pending();
-                //self.add_new_line();
-                // 不再把 summary 重复渲染到 messages（StreamChunk 已实时展示）。
-                // summary 只保存到 task_history 供历史记录查看。
+                // Don't re-render summary into messages (StreamChunk already displayed it).
+                // Summary is only saved to task_history for history viewing.
                 if let Some(entry) = self.task_history.last_mut() {
                     entry.summary = summary;
                 }
@@ -191,7 +192,7 @@ impl App {
                 self.task_start_time = None;
                 self.task_done_time = Some(chrono::Local::now());
             }
-            // 错误处理
+            // Error handling
             AgentUpdate::Error(kind) => {
                 match kind {
                     AgentErrorKind::BalanceNotSupported => {
@@ -211,7 +212,7 @@ impl App {
                         self.dirty = true;
                     }
                     AgentErrorKind::Other(msg) => {
-                        // 致命错误：flush 残留流式行
+                        // Fatal error: flush leftover streaming lines
                         self.flush_stream_pending();
                         let msgs = self.msgs();
                         self.add_system_message(msgs.error_tmpl.replace("{}", &msg));
@@ -220,7 +221,7 @@ impl App {
                     }
                 }
             }
-            // 更新令牌使用信息
+            // Update token usage info
             AgentUpdate::TokenUsage {
                 prompt,
                 completion,
@@ -234,22 +235,23 @@ impl App {
                 self.status_bar.token_cache_hit = prompt_cache_hit_tokens;
                 self.status_bar.token_cache_miss = prompt_cache_miss_tokens;
             }
-            // 更新余额信息
+            // Update balance info
             AgentUpdate::Balance(info) => {
                 self.balance_info = Some(info.clone());
             }
-            // 更新模型信息
+            // Update model info
             AgentUpdate::ModelInfo(params) => {
                 self.status_bar.model_name = params.model;
                 self.status_bar.model_max_tokens = params.max_tokens;
                 self.status_bar.model_thinking_budget = params.thinking_budget;
             }
-            // 添加系统消息
+            // Add system message
             AgentUpdate::Info(msg) => {
                 self.add_system_message(msg);
             }
             AgentUpdate::StepAdded(step) => {
-                // flush 残留的流式文本，避免 LLM 输出夹在 StepAdded 和 StepStarted 之间
+                // Flush leftover streaming text, preventing LLM output from appearing
+                // between StepAdded and StepStarted.
                 self.flush_stream_pending();
                 let idx = self.plan.steps.len();
                 self.plan.steps.push(step.clone());
@@ -275,13 +277,14 @@ impl App {
                 self.thinking.buffer.push_str(&text);
                 let msgs = self.msgs();
 
-                // 第一次收到 thinking 时添加标题行
+                // Add a title line on first thinking chunk
                 if !self.thinking.title_added {
                     let title_style = Style::default()
                         .fg(Color::Gray)
                         .add_modifier(Modifier::ITALIC)
                         .bg(Color::Rgb(35, 35, 45));
-                    // 在标题前插入空白隔离行，折叠前就建立视觉分隔
+                    // Insert a blank isolation line before the title to establish visual
+                    // separation before collapsing
                     self.messages.push(Line::from(""));
                     self.raw_messages.push(String::new());
                     let separator_idx = self.messages.len() - 1;
@@ -295,7 +298,7 @@ impl App {
                     self.thinking.active_start = Some(separator_idx);
                 }
 
-                // 行级缓冲：提取完整行实时显示
+                // Line-level buffering: extract complete lines for real-time display
                 let style = Style::default()
                     .fg(Color::Gray)
                     .add_modifier(Modifier::ITALIC)
@@ -319,12 +322,13 @@ impl App {
                 if !self.search.term.is_empty() {
                     self.update_search_matches();
                 }
-                // u16::MAX 会被 render_log_panel 按视觉行数正确裁剪
+                // u16::MAX is correctly clipped by render_log_panel based on visual line count
                 self.log_scroll.offset = u16::MAX;
             }
             AgentUpdate::StreamChunk(text) => {
-                // flush 残留的 thinking 行（没有尾换行符的最后一行）
-                // 注意：thinking 块已在 handle_agent_update 入口通过 gate 关闭。
+                // Flush leftover thinking lines (the last line without trailing newline)
+                // Note: the thinking block has already been closed by the gate at
+                // the entry of handle_agent_update.
                 if !self.thinking.buffer.is_empty() {
                     let style = Style::default()
                         .fg(Color::Gray)
@@ -344,7 +348,8 @@ impl App {
                 }
                 self.stream.buffer.push_str(&text);
 
-                // 行级缓冲：代码块按完整单元累积，表格行按表累积，普通行按段落累积
+                // Line-level buffering: code blocks accumulate by complete unit,
+                // table rows accumulate by table, normal lines accumulate by paragraph
                 let mut completed = Vec::new();
                 while let Some(idx) = self.stream.buffer.find('\n') {
                     let line = self.stream.buffer[..idx].to_string();
@@ -468,7 +473,7 @@ impl App {
                         )));
                         self.raw_messages.push(format!("```{}", lang));
                     } else {
-                        // 常规行处理
+                        // Regular line handling
                         let is_table_line = trimmed.starts_with('|');
                         let is_blank = trimmed.is_empty();
                         let is_hr = is_horizontal_rule(&line);
@@ -493,7 +498,7 @@ impl App {
                                 self.stream.table_buffer.clear();
                             }
                             if is_hr {
-                                // 水平分隔线直接丢弃
+                                // Discard horizontal rules
                             } else {
                                 completed.push((Line::from(""), String::new()));
                             }
@@ -522,13 +527,15 @@ impl App {
                 if !self.search.term.is_empty() {
                     self.update_search_matches();
                 }
-                // 自动滚动到底部（u16::MAX 会被 render_log_panel 按视觉行数裁剪）
+                // Auto-scroll to bottom (u16::MAX clipped by render_log_panel to visual line count)
                 self.log_scroll.offset = u16::MAX;
             }
         }
-        // 尾部统一刷新 scroll 状态，兜底 flush_and_close_thinking / flush_stream_pending
-        // 等 helper 插入消息后未更新 scroll 的情况（大部分 arm 会自行调 add_system_message，
-        // StreamChunk / ThinkingChunk 也各自更新，此处的冗余调用开销极小且无害）。
+        // Unified tail scroll state refresh, covering cases where helpers like
+        // flush_and_close_thinking / flush_stream_pending inserted messages without
+        // updating scroll (most arms call add_system_message independently,
+        // StreamChunk / ThinkingChunk also update separately; this redundant call is
+        // cheap and harmless).
         self.log_scroll.state = ScrollbarState::new(self.total_log_lines().saturating_sub(1));
         if !self.search.term.is_empty() {
             self.update_search_matches();

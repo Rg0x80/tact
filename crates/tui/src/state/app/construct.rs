@@ -25,7 +25,7 @@ const STREAMING_INDICATOR: &str = " ▌";
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 impl App {
-    /// 创建初始化的 App 实例，默认进入 Insert 模式并使用 Nord 主题。
+    /// Create an initialized App instance, defaulting to Insert mode with the Nord theme.
     pub(crate) fn new(
         agent_rx: UnboundedReceiver<AgentUpdate>,
         user_cmd_tx: UnboundedSender<UserCommand>,

@@ -4,14 +4,14 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, List, ListItem, Widget};
 use crate::state::HistoryEntry;
 
-/// 任务历史面板 Widget，按时间倒序展示历史记录，支持回车重试。
+/// Task history panel widget, showing history entries in reverse chronological order, with Enter to retry.
 pub struct HistoryPopupWidget<'a> {
     history: &'a [HistoryEntry],
-    /// 条目前景色。
+    /// Entry foreground color.
     accent_color: Color,
-    /// 边框色。
+    /// Border color.
     border_color: Color,
-    /// 面板标题（i18n）。
+    /// Panel title (i18n).
     title: &'static str,
 }
 

@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Scrollbar, ScrollbarState},
 };
 
-/// 渲染 Log 面板，支持长行自动折行、滚动、搜索高亮和鼠标选择高亮。
+/// Render the Log panel: supports automatic line wrapping for long lines, scrolling, search highlighting, and mouse selection highlighting.
 pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
     app.log_scroll.height = area.height.saturating_sub(2);
     let visible_height = app.log_scroll.height as usize;
@@ -149,7 +149,7 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
             String::new()
         };
 
-        // 构建 thinking 折叠指示前缀
+        // Build thinking collapse indicator prefix
         let prefix = phys_idx.and_then(|phys| {
             app.thinking.blocks.iter().find_map(|block| {
                 if block.title_idx == phys {
@@ -184,7 +184,7 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
         renderer.push(vs_cache[logical_i], cell);
     }
 
-    // 渲染带边框的 log 面板
+    // Render bordered log panel
     let log_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))

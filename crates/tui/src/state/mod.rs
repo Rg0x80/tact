@@ -30,9 +30,9 @@ pub(crate) use status_bar_state::StatusBarState;
 pub(crate) use stream_state::StreamState;
 pub(crate) use thinking_state::{ThinkingBlock, ThinkingPopup, ThinkingState};
 
-// ========== 基础类型 ==========
+// ========== Basic Types ==========
 
-/// 当前键盘输入模式，决定按键行为的解释方式。
+/// Current keyboard input mode, determining how key presses are interpreted.
 #[derive(PartialEq)]
 pub(crate) enum InputMode {
     Normal,
@@ -68,20 +68,20 @@ pub struct HistoryEntry {
     pub summary: String,
 }
 
-// ========== Diff 类型 ==========
+// ========== Diff Types ==========
 
-/// 文件写入 diff 块信息。
+/// Info for a file write diff block.
 #[derive(Debug, Clone)]
 pub(crate) struct DiffBlock {
-    /// diff 块的首行索引（在 messages 中）。
+    /// Starting line index of the diff block (in messages).
     pub start_idx: usize,
-    /// diff 块的末行索引（在 messages 中，不包含）。
+    /// Ending line index of the diff block (in messages, exclusive).
     pub end_idx: usize,
     pub file_path: String,
     pub content: String,
 }
 
-/// 文件写入内容的弹窗预览状态。
+/// Popup preview state for file write content.
 #[derive(Debug, Clone)]
 pub(crate) struct DiffPopup {
     pub block_idx: usize,
@@ -104,7 +104,7 @@ pub(crate) struct CodeBlock {
     pub styled: Vec<Line<'static>>,
 }
 
-/// 代码块弹窗状态（类似 ThinkingPopup/DiffPopup）。
+/// Code block popup state (similar to ThinkingPopup / DiffPopup).
 #[derive(Debug, Clone)]
 pub(crate) struct CodePopup {
     pub block_idx: usize,
@@ -112,9 +112,9 @@ pub(crate) struct CodePopup {
     pub scroll: u16,
 }
 
-// ========== 执行状态 ==========
+// ========== Execution State ==========
 
-/// Agent 当前的执行状态，用于驱动状态栏和 UI 反馈。
+/// Current agent execution state, driving the status bar and UI feedback.
 pub(crate) enum Status {
     Idle,
     Planning,
@@ -130,17 +130,18 @@ pub(crate) enum Status {
     Done,
 }
 
-// ========== 主状态 ==========
+// ========== Main State ==========
 
-/// TUI 应用主状态，持有所有 UI 状态、滚动位置、通信通道及当前模式。
+/// TUI application main state, holding all UI state, scroll positions,
+/// communication channels, and current mode.
 pub struct App {
-    // 输入
+    // Input
     pub(crate) input: String,
     pub(crate) input_cursor: usize,
     pub(crate) input_scroll: u16,
     pub(crate) cmd_line: String,
     pub(crate) messages: Vec<Line<'static>>,
-    /// 可见索引缓存：logical line → physical msg index。由 render_log_panel 每帧重建。
+    /// Visible index cache: logical line → physical msg index. Rebuilt by render_log_panel each frame.
     pub(crate) visible_indices: Vec<usize>,
     pub(crate) raw_messages: Vec<String>,
     pub(crate) plan: PlanPanel,
@@ -149,67 +150,69 @@ pub struct App {
     pub(crate) user_cmd_tx: UnboundedSender<UserCommand>,
     pub(crate) task_history: Vec<HistoryEntry>,
     pub(crate) theme: Theme,
-    // 滚动
+    // Scroll
     pub(crate) log_scroll: LogScroll,
-    // 面板
+    // Panels
     pub(crate) show_history: bool,
     pub(crate) show_help: bool,
     pub(crate) focused_panel: FocusedPanel,
-    // 鼠标交互
+    // Mouse interaction
     pub(crate) mouse: MouseState,
-    // 模式
+    // Mode
     pub(crate) input_mode: InputMode,
-    // 命令面板
+    // Command palette
     pub(crate) palette_selected: usize,
-    // 搜索
+    // Search
     pub(crate) search: SearchState,
-    // 命令历史（简略）
+    // Command history (brief)
     pub(crate) command_history: Vec<String>,
-    /// 用户输入历史。
+    /// User input history.
     pub(crate) input_history: InputHistory,
-    /// 项目根目录，用于读写 .tact/history.txt。
+    /// Project root directory, used to read/write .tact/history.txt.
     pub(crate) work_dir: PathBuf,
     pub(crate) should_quit: bool,
-    /// 脏标记：当有输入事件、agent 更新或尺寸变化时置 true，空闲时跳过无意义的重绘。
+    /// Dirty flag: set to true on input events, agent updates, or size changes;
+    /// skips pointless repaints while idle.
     pub(crate) dirty: bool,
-    /// 内部剪贴板缓冲区（当系统剪贴板不可用时使用）
+    /// Internal clipboard buffer (used when system clipboard is unavailable).
     pub(crate) clipboard_buffer: String,
-    // 底部状态栏
+    // Bottom status bar
     pub(crate) status_bar: StatusBarState,
-    /// 当前任务开始时间（用于底部状态栏计时）
+    /// Current task start time (for bottom status bar timer).
     pub(crate) task_start_time: Option<chrono::DateTime<chrono::Local>>,
-    /// 任务完成时间（用于顶部状态栏 Done 高亮计时，2s 后自动恢复 Idle 显示）
+    /// Task completion time (for top status bar Done highlight timer;
+    /// auto-reverts to Idle display after 2s).
     pub(crate) task_done_time: Option<chrono::DateTime<chrono::Local>>,
-    /// 进程启动时间（用于底部状态栏显示 TUI 总运行时间）
+    /// Process start time (for bottom status bar showing total TUI uptime).
     pub(crate) process_start_time: chrono::DateTime<chrono::Local>,
-    /// 当前工作目录
+    /// Current working directory.
     pub(crate) workspace_dir: String,
-    /// 文件写入 diff 块列表。
+    /// File write diff block list.
     pub(crate) diff_blocks: Vec<DiffBlock>,
-    /// 文件写入内容的弹窗预览。
+    /// File write content popup preview.
     pub(crate) diff_popup: Option<DiffPopup>,
     /// Completed LLM code block overlays.
     pub(crate) code_blocks: Vec<CodeBlock>,
-    /// 代码块弹窗预览（全屏独立滚动查看）。
+    /// Code block popup preview (fullscreen independent scroll viewer).
     pub(crate) code_popup: Option<CodePopup>,
-    // 选择弹窗
+    // Selection popup
     pub(crate) select: SelectPopup,
-    // 流式输出状态
+    // Streaming output state
     pub(crate) stream: StreamState,
-    // Thinking 状态
+    // Thinking state
     pub(crate) thinking: ThinkingState,
-    /// DeepSeek 账户余额信息（页面加载时查询一次并缓存）
+    /// DeepSeek account balance info (queried once on load and cached).
     pub(crate) balance_info: Option<tact_core::BalanceInfo>,
-    /// 派对模式：Konami Code 触发的彩蛋
+    /// Party mode: easter egg triggered by Konami Code.
     pub(crate) party_mode: bool,
-    /// Konami Code 输入进度 (0=未开始, 1-10=进度, 10=触发)
+    /// Konami Code input progress (0 = not started, 1–10 = in progress, 10 = triggered).
     pub(crate) konami_progress: u8,
-    /// 当前界面语言。
+    /// Current interface language.
     pub(crate) language: Language,
-    /// 短暂状态栏通知（显示 3s 后自动消失）
+    /// Brief status bar notification (auto-clears after 3s).
     pub(crate) flash_msg: Option<(String, std::time::Instant)>,
-    /// 输入框 undo 栈（最多 100 条，每次变更前保存快照）
+    /// Input box undo stack (max 100, snapshot saved before each change).
     pub(crate) undo_stack: Vec<(String, usize)>,
-    /// 输入框 redo 栈
+    /// Input box redo stack.
     pub(crate) redo_stack: Vec<(String, usize)>,
 }
