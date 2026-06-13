@@ -243,6 +243,34 @@ pub async fn run_tui(
                                 }
                                 _ => {}
                             }
+                        } else if app.code_popup.is_some() {
+                            // 代码块弹窗的键盘处理
+                            match key.code {
+                                KeyCode::Esc => {
+                                    app.close_code_popup();
+                                }
+                                KeyCode::Char('y') => {
+                                    app.copy_code_popup();
+                                }
+                                KeyCode::Char('j') | KeyCode::Down => {
+                                    app.code_popup_scroll_down();
+                                }
+                                KeyCode::Char('k') | KeyCode::Up => {
+                                    app.code_popup_scroll_up();
+                                }
+                                KeyCode::Char('G') => {
+                                    // 跳到底部——用一个很大的值，渲染时会 clamp
+                                    if let Some(ref mut p) = app.code_popup {
+                                        p.scroll = u16::MAX;
+                                    }
+                                }
+                                KeyCode::Char('g') => {
+                                    if let Some(ref mut p) = app.code_popup {
+                                        p.scroll = 0;
+                                    }
+                                }
+                                _ => {}
+                            }
                         } else if app.thinking.popup.is_some() {
                             // Thinking 弹窗的键盘处理
                             match key.code {
@@ -327,6 +355,8 @@ pub async fn run_tui(
                                     app.thinking_popup_scroll_up();
                                 } else if app.diff_popup.is_some() {
                                     app.diff_popup_scroll_up();
+                                } else if app.code_popup.is_some() {
+                                    app.code_popup_scroll_up();
                                 } else if in_log && app.log_scroll.offset > 0 {
                                     app.log_scroll.offset -= 1;
                                 } else if in_plan && app.plan.selected > 0 {
@@ -339,6 +369,8 @@ pub async fn run_tui(
                                     app.thinking_popup_scroll_down();
                                 } else if app.diff_popup.is_some() {
                                     app.diff_popup_scroll_down();
+                                } else if app.code_popup.is_some() {
+                                    app.code_popup_scroll_down();
                                 } else if in_log {
                                     app.log_scroll.offset = app.log_scroll.offset.saturating_add(1);
                                 } else if in_plan
@@ -367,6 +399,15 @@ pub async fn run_tui(
                                         && mouse.row < pa.y + pa.height;
                                     if !in_popup {
                                         app.close_diff_popup();
+                                    }
+                                } else if app.code_popup.is_some() {
+                                    let pa = app.mouse.code_popup_area;
+                                    let in_popup = mouse.column >= pa.x
+                                        && mouse.column < pa.x + pa.width
+                                        && mouse.row >= pa.y
+                                        && mouse.row < pa.y + pa.height;
+                                    if !in_popup {
+                                        app.close_code_popup();
                                     }
                                 } else if in_log {
                                     app.focused_panel = FocusedPanel::Log;
@@ -464,36 +505,65 @@ pub async fn run_tui(
                                             }
                                         } else {
                                             app.mouse.last_click_diff = None;
-                                            // 检查是否点击了 thinking 标题行 → 打开弹窗
-                                            let thinking_title = app
-                                                .thinking
-                                                .blocks
+                                            // 检查是否点击了代码块 → 双击打开弹窗
+                                            let code_hit = app
+                                                .code_blocks
                                                 .iter()
-                                                .any(|b| b.title_idx == phys_idx);
-                                            if thinking_title {
-                                                app.open_thinking_popup(phys_idx);
-                                            } else if app.mouse.click_count == 2 {
-                                                // 双击：选择单词
-                                                app.mouse.log_selection = Some((line_idx, line_idx));
-                                                app.mouse.log_word_selection =
-                                                    app.find_word_bounds(line_idx, col);
-                                                app.mouse.dragging_log = true;
-                                            } else if app.mouse.click_count >= 3 {
-                                                // 三击：选择整行，若在代码块内则选中整个代码块
-                                                app.mouse.log_word_selection = None;
-                                                if let Some((cb_start, cb_end)) =
-                                                    app.find_code_block_containing_logical(line_idx)
+                                                .enumerate()
+                                                .find(|(_, b)| {
+                                                    app.phys_to_logical_fast(b.start_idx)
+                                                        .map_or(false, |si| line_idx >= si)
+                                                        && app.phys_to_logical_fast(b.end_idx)
+                                                            .map_or(false, |ei| line_idx < ei)
+                                                });
+                                            if let Some((code_idx, _block)) = code_hit {
+                                                if app.mouse.click_count == 1 {
+                                                    app.mouse.last_click_code = Some(code_idx);
+                                                    app.mouse.log_word_selection = None;
+                                                    app.mouse.log_selection = None;
+                                                    app.mouse.dragging_log = false;
+                                                } else if app.mouse.click_count == 2
+                                                    && app.mouse.last_click_code == Some(code_idx)
                                                 {
-                                                    app.mouse.log_selection = Some((cb_start, cb_end));
-                                                } else {
+                                                    app.open_code_popup(code_idx);
+                                                } else if app.mouse.click_count >= 3 {
+                                                    app.mouse.log_word_selection = None;
                                                     app.mouse.log_selection = Some((line_idx, line_idx));
+                                                    app.mouse.dragging_log = true;
                                                 }
-                                                app.mouse.dragging_log = true;
                                             } else {
-                                                // 单击：清除之前的选择，不选中文本
-                                                app.mouse.log_word_selection = None;
-                                                app.mouse.log_selection = None;
-                                                app.mouse.dragging_log = false;
+                                                app.mouse.last_click_code = None;
+                                                // 检查是否点击了 thinking 标题行 → 打开弹窗
+                                                let thinking_title = app
+                                                    .thinking
+                                                    .blocks
+                                                    .iter()
+                                                    .any(|b| b.title_idx == phys_idx);
+                                                if thinking_title {
+                                                    app.open_thinking_popup(phys_idx);
+                                                } else if app.mouse.click_count == 2 {
+                                                    // 双击：选择单词
+                                                    app.mouse.log_selection = Some((line_idx, line_idx));
+                                                    app.mouse.log_word_selection =
+                                                        app.find_word_bounds(line_idx, col);
+                                                    app.mouse.dragging_log = true;
+                                                } else if app.mouse.click_count >= 3 {
+                                                    // 三击：选择整行，若在代码块内则选中整个代码块
+                                                    app.mouse.log_word_selection = None;
+                                                    if let Some((cb_start, cb_end)) =
+                                                        app.find_code_block_containing_logical(line_idx)
+                                                    {
+                                                        app.mouse.log_selection = Some((cb_start, cb_end));
+                                                    } else {
+                                                        app.mouse.log_selection = Some((line_idx, line_idx));
+                                                    }
+                                                    app.mouse.dragging_log = true;
+                                                } else {
+                                                    // 单击：清除之前的选择，不选中文本
+                                                    app.mouse.log_word_selection = None;
+                                                    app.mouse.log_selection = None;
+                                                    app.mouse.dragging_log = false;
+                                                }
                                             }
                                         }
                                     }

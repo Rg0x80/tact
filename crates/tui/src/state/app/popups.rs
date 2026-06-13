@@ -242,5 +242,72 @@ impl App {
         ));
         self.diff_popup = None;
     }
+
+    // ========== Code Popup ==========
+
+    /// 打开代码块弹窗。
+    pub(crate) fn open_code_popup(&mut self, block_idx: usize) {
+        if block_idx < self.code_blocks.len() {
+            let block = &self.code_blocks[block_idx];
+            self.code_popup = Some(CodePopup {
+                block_idx,
+                lang: block.lang.clone(),
+                scroll: 0,
+            });
+        }
+    }
+
+    /// 关闭代码块弹窗。
+    pub(crate) fn close_code_popup(&mut self) {
+        self.code_popup = None;
+    }
+
+    /// 弹窗内向上滚动。
+    pub(crate) fn code_popup_scroll_up(&mut self) {
+        if let Some(ref mut popup) = self.code_popup {
+            popup.scroll = popup.scroll.saturating_sub(1);
+        }
+    }
+
+    /// 弹窗内向下滚动（上限由渲染时的实际行数限制）。
+    pub(crate) fn code_popup_scroll_down(&mut self) {
+        if let Some(ref mut popup) = self.code_popup {
+            popup.scroll = popup.scroll.saturating_add(1);
+        }
+    }
+
+    /// 复制弹窗代码内容到剪贴板。
+    pub(crate) fn copy_code_popup(&mut self) {
+        let popup = match &self.code_popup {
+            Some(p) => p,
+            None => return,
+        };
+        let block = &self.code_blocks[popup.block_idx];
+        let text = &block.content;
+        let preview = if text.chars().count() > 40 {
+            format!("{}…", text.chars().take(40).collect::<String>())
+        } else {
+            text.clone()
+        };
+
+        if let Ok(mut clip) = Clipboard::new()
+            && clip.set_text(text).is_ok()
+        {
+            self.add_system_message(format!("📋 Copied: {}", preview));
+            return;
+        }
+        let encoded = BASE64.encode(text);
+        let osc52 = format!("\x1b]52;c;{}\x07", encoded);
+        if std::io::Write::write_all(&mut std::io::stdout(), osc52.as_bytes()).is_ok() {
+            self.add_system_message(format!("📋 Copied to terminal clipboard: {}", preview));
+            return;
+        }
+        self.clipboard_buffer = text.clone();
+        self.add_system_message(format!(
+            "📋 Copied to internal buffer (clipboard unavailable): {}",
+            preview
+        ));
+        self.code_popup = None;
+    }
 }
 

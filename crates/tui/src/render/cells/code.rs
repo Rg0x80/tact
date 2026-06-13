@@ -47,6 +47,7 @@ pub(crate) fn render_code_cards(
         let total_styled = block.styled.len();
         let inner_h = (y_bot.saturating_sub(y_top).saturating_sub(2)) as usize;
         let shown = total_styled.min(inner_h);
+        let msgs = app.msgs();
         let card_block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -60,11 +61,14 @@ pub(crate) fn render_code_cards(
             ))
             .title_bottom(if total_styled > shown {
                 Line::from(Span::styled(
-                    format!(" +{} lines ", total_styled - shown),
+                    format!(" +{} lines | {}", total_styled - shown, msgs.code_card_bottom),
                     Style::default().fg(Color::DarkGray),
                 ))
             } else {
-                Line::from("")
+                Line::from(Span::styled(
+                    msgs.code_card_bottom,
+                    Style::default().fg(Color::DarkGray),
+                ))
             });
 
         let card_area = Rect::new(

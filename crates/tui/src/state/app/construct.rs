@@ -91,6 +91,7 @@ impl App {
             diff_blocks: Vec::new(),
             diff_popup: None,
             code_blocks: Vec::new(),
+            code_popup: None,
             stream: StreamState::new(),
             thinking: ThinkingState::new(),
             balance_info: None,

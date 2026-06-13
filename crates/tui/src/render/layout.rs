@@ -35,4 +35,7 @@ pub(crate) fn render_main_area(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.diff_popup.is_some() {
         super::popups::diff_popup::render_diff_popup(frame, area, app);
     }
+    if app.code_popup.is_some() {
+        super::popups::code_popup::render_code_popup(frame, area, app);
+    }
 }
