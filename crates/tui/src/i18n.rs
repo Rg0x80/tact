@@ -42,6 +42,7 @@ pub struct Messages {
     pub thinking_card_bottom: &'static str, // "↕ {}/{} lines | Click for full content"
     pub diff_card_title: &'static str,     // "+{} {}"
     pub diff_card_bottom: &'static str,    // "Double-click for full code"
+    pub code_card_bottom: &'static str,    // " Click for full code "
     pub diff_overflow_tmpl: &'static str,  // "... and {} more lines ..."
     pub plan_title: &'static str,
     pub palette_title: &'static str,
@@ -208,6 +209,7 @@ impl Messages {
             thinking_card_bottom: " ↕ {}/{} lines | Click for full content ",
             diff_card_title: " +{} {} ",
             diff_card_bottom: " Double-click for full code ",
+            code_card_bottom: " Click for full code ",
             diff_overflow_tmpl: " ... and {} more lines ...",
             plan_title: " 🔥 [Execution Plan] ",
             palette_title: " Palette /{} ",
@@ -355,6 +357,7 @@ impl Messages {
             thinking_card_bottom: " ↕ {}/{} 行 | 点击查看完整内容 ",
             diff_card_title: " +{} {} ",
             diff_card_bottom: " 双击查看完整代码 ",
+            code_card_bottom: " 点击查看完整代码 ",
             diff_overflow_tmpl: " ... 还有 {} 行 ...",
             plan_title: " 🔥 [执行计划] ",
             palette_title: " 命令面板 /{} ",

@@ -1,11 +1,11 @@
+use crate::state::App;
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
-use crate::state::App;
 
 /// 渲染 thinking block 卡片叠层。
 pub(crate) fn render_thinking_cards(
@@ -73,6 +73,7 @@ pub(crate) fn render_thinking_cards(
             area.width.saturating_sub(2),
             y_bot - y_top,
         );
+        frame.render_widget(Clear, card_area);
         frame.render_widget(card_block, card_area);
 
         let inner = Rect::new(
@@ -91,7 +92,10 @@ pub(crate) fn render_thinking_cards(
                 .take(3)
                 .map(|s| {
                     let display = if s.len() > inner.width as usize {
-                        format!("{}…", &s[..inner.width as usize - 1])
+                        let max_bytes =
+                            (inner.width as usize).saturating_sub(1).min(s.len());
+                        let safe_end = s.floor_char_boundary(max_bytes);
+                        format!("{}…", &s[..safe_end])
                     } else {
                         s.clone()
                     };

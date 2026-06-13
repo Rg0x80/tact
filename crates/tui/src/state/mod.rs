@@ -8,7 +8,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 pub(crate) use tact_core::PlanStep;
 
-mod app;
+pub(crate) mod app;
 mod input_history;
 mod log_scroll;
 mod mouse_state;
@@ -104,6 +104,14 @@ pub(crate) struct CodeBlock {
     pub styled: Vec<Line<'static>>,
 }
 
+/// 代码块弹窗状态（类似 ThinkingPopup/DiffPopup）。
+#[derive(Debug, Clone)]
+pub(crate) struct CodePopup {
+    pub block_idx: usize,
+    pub lang: String,
+    pub scroll: u16,
+}
+
 // ========== 执行状态 ==========
 
 /// Agent 当前的执行状态，用于驱动状态栏和 UI 反馈。
@@ -182,6 +190,8 @@ pub struct App {
     pub(crate) diff_popup: Option<DiffPopup>,
     /// Completed LLM code block overlays.
     pub(crate) code_blocks: Vec<CodeBlock>,
+    /// 代码块弹窗预览（全屏独立滚动查看）。
+    pub(crate) code_popup: Option<CodePopup>,
     // 选择弹窗
     pub(crate) select: SelectPopup,
     // 流式输出状态

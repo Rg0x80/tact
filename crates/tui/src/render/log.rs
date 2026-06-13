@@ -5,7 +5,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Scrollbar, ScrollbarState},
+    widgets::{Block, Borders, Clear, Scrollbar, ScrollbarState},
 };
 
 /// 渲染 Log 面板，支持长行自动折行、滚动、搜索高亮和鼠标选择高亮。
@@ -197,6 +197,7 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
         area.height.saturating_sub(2),
     );
     frame.render_widget(log_block, area);
+    frame.render_widget(Clear, inner);
     frame.render_widget(renderer, inner);
 
     // ---- Card overlay: thinking blocks ----

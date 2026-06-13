@@ -202,6 +202,29 @@ pub(crate) fn handle_normal_mode(
                 }
             }
         }
+        KeyCode::Char('V') => {
+            // 打开最可见的代码块弹窗
+            if app.code_popup.is_some() {
+                app.close_code_popup();
+            } else if !app.code_blocks.is_empty() && app.focused_panel == FocusedPanel::Log {
+                let logical_offset = app.log_scroll.offset as usize;
+                // 找到 start_idx 最接近当前滚动位置（且不超过）的代码块
+                let best = app
+                    .code_blocks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, block)| {
+                        app.phys_to_logical_fast(block.start_idx)
+                            .map(|l| l <= logical_offset)
+                            .unwrap_or(false)
+                    })
+                    .last()
+                    .or_else(|| app.code_blocks.iter().enumerate().last());
+                if let Some((idx, _)) = best {
+                    app.open_code_popup(idx);
+                }
+            }
+        }
         KeyCode::Char('c') => {
             if !matches!(app.status, Status::Idle) {
                 let _ = _user_cmd_tx.send(UserCommand::Cancel);

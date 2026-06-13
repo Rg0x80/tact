@@ -37,6 +37,7 @@ pub mod task;
 pub mod team;
 pub mod tool;
 pub mod worktree;
+pub mod stats;
 pub use anthropic_ai_sdk::types::message::Tool as ToolSpec;
 
 use crate::llm::{LlmClient, LlmProvider};
@@ -63,6 +64,7 @@ use crate::recovery::{
     CONTINUATION_MESSAGE, MAX_RECOVERY_ATTEMPTS, RecoveryState, backoff_delay,
     is_prompt_too_long_error, is_transient_transport_error,
 };
+use crate::stats::SessionStats;
 use crate::tool::{ToolContext, ToolRouter};
 use tact_core::{AgentUpdate, StepResult, StepStatus};
 
@@ -98,6 +100,7 @@ pub struct AgentRuntime {
     pub compact_state: CompactState,
     pub recovery_state: RecoveryState,
     pub permission_manager: PermissionManager,
+    pub stats: SessionStats,
     pub ui_tx: Option<tokio::sync::mpsc::UnboundedSender<AgentUpdate>>,
     pub cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
@@ -141,6 +144,7 @@ impl Agent {
                 compact_state: CompactState::default(),
                 recovery_state: RecoveryState::default(),
                 permission_manager,
+                stats: SessionStats::default(),
                 ui_tx: None,
                 cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
@@ -225,6 +229,14 @@ impl Agent {
                     .map(|t| serde_json::json!({"thinking": t}).to_string()),
             }));
 
+            // ── Stats: before LLM call ──
+            self.runtime.stats.prompt_count += 1;
+            let prompt_chars = serde_json::to_string(&request)
+                .map(|s| s.chars().count() as u64)
+                .unwrap_or(0);
+            self.runtime.stats.total_prompt_chars += prompt_chars;
+            let llm_call_start = std::time::Instant::now();
+
             let (content, stop_reason) = match self.stream_message(&request).await {
                 Ok(result) => {
                     self.runtime.recovery_state.transport_attempts = 0;
@@ -262,6 +274,23 @@ impl Agent {
                     return Err(anyhow::anyhow!(error));
                 }
             };
+
+            // ── Stats: after LLM call ──
+            self.runtime
+                .stats
+                .llm_call_durations
+                .push(llm_call_start.elapsed());
+            let response_chars = serde_json::to_string(&content)
+                .map(|s| s.chars().count() as u64)
+                .unwrap_or(0);
+            self.runtime.stats.total_response_chars += response_chars;
+            for block in &content {
+                if let ContentBlock::Thinking { thinking, .. } = block {
+                    self.runtime.stats.thinking_blocks += 1;
+                    self.runtime.stats.total_thinking_chars +=
+                        thinking.chars().count() as u64;
+                }
+            }
 
             self.runtime
                 .context
@@ -349,6 +378,12 @@ impl Agent {
         let mut manual_compact = None;
         for block in content {
             if let ContentBlock::ToolUse { id, name, input } = block {
+                *self
+                    .runtime
+                    .stats
+                    .tool_counts
+                    .entry(name.clone())
+                    .or_insert(0) += 1;
                 if self
                     .runtime
                     .cancel_flag
@@ -508,6 +543,7 @@ impl Agent {
                             _ => None,
                         };
                         let duration_ms = start.elapsed().as_millis() as u64;
+                        self.runtime.stats.tool_durations_ms.push(duration_ms);
                         let step_result = StepResult {
                             tool: tool_use.name.clone(),
                             arg_summary,
@@ -713,12 +749,37 @@ Be compact but concrete. Preserve exact file paths, function names, and type sig
                 .as_ref()
                 .map(|t| serde_json::json!({"thinking": t}).to_string()),
         }));
+        // ── Stats: before compaction LLM call ──
+        self.runtime.stats.prompt_count += 1;
+        let compact_prompt_chars = serde_json::to_string(&request)
+            .map(|s| s.chars().count() as u64)
+            .unwrap_or(0);
+        self.runtime.stats.total_prompt_chars += compact_prompt_chars;
+        let compact_start = std::time::Instant::now();
+
         let (blocks, _stop_reason) = self
             .runtime
             .client
             .create_message(&request)
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+        // ── Stats: after compaction LLM call ──
+        self.runtime
+            .stats
+            .llm_call_durations
+            .push(compact_start.elapsed());
+        let compact_response_chars = serde_json::to_string(&blocks)
+            .map(|s| s.chars().count() as u64)
+            .unwrap_or(0);
+        self.runtime.stats.total_response_chars += compact_response_chars;
+        for block in &blocks {
+            if let ContentBlock::Thinking { thinking, .. } = block {
+                self.runtime.stats.thinking_blocks += 1;
+                self.runtime.stats.total_thinking_chars +=
+                    thinking.chars().count() as u64;
+            }
+        }
         let summary = blocks
             .iter()
             .filter_map(|block| match block {
@@ -741,6 +802,7 @@ Be compact but concrete. Preserve exact file paths, function names, and type sig
             }
         }
         self.runtime.context = compacted_context(full_summary);
+        self.runtime.stats.compactions += 1;
         Ok(())
     }
 

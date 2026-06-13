@@ -13,6 +13,8 @@ pub(crate) struct MouseState {
     pub(crate) thinking_popup_area: Rect,
     /// diff 弹窗区域（用于判断点击是否在弹窗内部）。
     pub(crate) diff_popup_area: Rect,
+    /// 代码块弹窗区域（用于判断点击是否在弹窗内部）。
+    pub(crate) code_popup_area: Rect,
     /// 双击/三击检测：上次左键点击的时间和位置。
     pub(crate) last_click_time: Option<std::time::Instant>,
     pub(crate) last_click_pos: Option<(u16, u16)>,
@@ -24,6 +26,8 @@ pub(crate) struct MouseState {
     pub(crate) last_click_card: Option<usize>,
     /// 上次点击命中的 diff 块索引（用于双击打开弹窗）。
     pub(crate) last_click_diff: Option<usize>,
+    /// 上次点击命中的代码块索引（用于双击打开弹窗）。
+    pub(crate) last_click_code: Option<usize>,
 }
 
 impl MouseState {

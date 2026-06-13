@@ -1,3 +1,4 @@
+pub(crate) mod code_popup;
 pub(crate) mod command_palette;
 pub(crate) mod diff_popup;
 pub(crate) mod help;
