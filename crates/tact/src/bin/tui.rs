@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let (agent_tx, agent_rx) = tokio::sync::mpsc::unbounded_channel();
     let (user_cmd_tx, mut user_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    // 克隆一份用于启动时查询余额等后台任务
+    // Clone a copy for background tasks like balance query at startup
     let agent_tx2 = agent_tx.clone();
 
     let tools = toolset();
@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         tui::run_tui(agent_rx, user_cmd_tx, tui_work_dir).await
     }));
 
-    // 启动时查询 DeepSeek 余额
+    // Query DeepSeek balance at startup
     if tact::llm::is_deepseek() {
         let balance_tx = agent_tx2;
         tokio::spawn(async move {

@@ -2,7 +2,7 @@ use crate::state::{App, InputMode, PALETTE_COMMANDS};
 use crossterm::event::{KeyCode, KeyEvent};
 use super::{execute_palette_command, prev_word_boundary};
 
-/// Palette 模式按键处理：过滤命令列表并通过上下键选择，Enter 执行。
+/// Palette mode key handling: filter the command list and navigate with arrow keys; Enter to execute.
 pub(crate) fn handle_palette_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {
@@ -25,7 +25,7 @@ pub(crate) fn handle_palette_mode(app: &mut App, key: KeyEvent) {
                 execute_palette_command(app, cmd);
             }
         }
-        // Ctrl+W: 删除最后一个词
+        // Ctrl+W: delete last word
         KeyCode::Char('w')
             if key
                 .modifiers
@@ -35,7 +35,7 @@ pub(crate) fn handle_palette_mode(app: &mut App, key: KeyEvent) {
             app.cmd_line.drain(pos..);
             app.palette_selected = 0;
         }
-        // Ctrl+U: 清空 palette 输入
+        // Ctrl+U: clear palette input
         KeyCode::Char('u')
             if key
                 .modifiers

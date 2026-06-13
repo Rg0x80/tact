@@ -6,8 +6,8 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-/// 渲染底部栏，显示焦点面板、操作提示、工作目录、Git 分支、
-/// 模型信息、Token 统计、任务耗时、TUI 运行时长和账户余额。
+/// Render the bottom bar, showing focused panel, shortcut hints, working directory, Git branch,
+/// Model info, token stats, task elapsed time, TUI uptime, and account balance.
 pub(crate) fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
     let msgs = app.msgs();
     let focus = match app.focused_panel {
@@ -134,7 +134,7 @@ pub(crate) fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-/// 渲染顶部状态栏，显示当前模式、焦点面板和 Agent 执行状态。
+/// Render the top status bar, showing current mode, focused panel, and Agent execution state.
 pub(crate) fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let msgs = app.msgs();
     let mode_indicator = match app.input_mode {

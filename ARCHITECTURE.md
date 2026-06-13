@@ -1,22 +1,22 @@
-# 架构与流程文档
+# Architecture & Flow
 
-本文档通过 Mermaid 图表描述 `agent-tui-full` 的整体架构、核心数据流及终端界面布局。
+This document describes the overall architecture, core data flow, and terminal UI layout of `tact` using Mermaid diagrams.
 
 ---
 
-## 0. Workspace 结构
+## 0. Workspace Structure
 
-本项目是一个 Cargo Workspace，包含以下 crate：
+This project is a Cargo Workspace containing the following crates:
 
-| 目录 | 包名 | 职责 |
+| Directory | Package | Responsibility |
 |---|---|---|
-| `crates/core` | `tact_core` | 共享类型：`AgentUpdate`、`UserCommand`、`PlanStep`、`StepResult`、`StepStatus` |
-| `crates/tools` | `tools` | `Sandbox`：文件读写、命令执行的安全封装 |
-| `crates/tui` | `tui` | 基于 `ratatui` 的终端交互界面 |
-| `crates/tact` | `tact` | Agent runtime、主循环、工具路由、CLI 入口 |
-| `crates/tool_refactor_macros` | `tool_refactor_macros` | 工具重构相关的过程宏 |
+| `crates/core` | `tact_core` | Shared types: `AgentUpdate`, `UserCommand`, `PlanStep`, `StepResult`, `StepStatus` |
+| `crates/tools` | `tools` | `Sandbox`: secure wrappers for file I/O and command execution |
+| `crates/tui` | `tui` | Terminal UI built with `ratatui` |
+| `crates/tact` | `tact` | Agent runtime, main loop, tool router, CLI entry point |
+| `crates/tool_refactor_macros` | `tool_refactor_macros` | Proc macros for tool refactoring |
 
-依赖关系（简图）：
+Dependency graph:
 
 ```mermaid
 flowchart TB
@@ -29,23 +29,23 @@ flowchart TB
 
 ---
 
-## 1. 模块架构图
+## 1. Module Architecture
 
 ```mermaid
 flowchart TB
     subgraph main["main.rs"]
-        M["main()<br/>初始化运行时、通道、启动任务"]
+        M["main()<br/>Initialize runtime, channels, spawn tasks"]
     end
 
-    subgraph agent_mod["tact/src/lib.rs — Agent 核心"]
-        A["Agent 结构体"]
-        AG["generate_plan()<br/>调用 OpenAI API"]
-        AE["execute_step()<br/>调用沙箱工具"]
+    subgraph agent_mod["tact/src/lib.rs — Agent Core"]
+        A["Agent struct"]
+        AG["generate_plan()<br/>Call LLM API"]
+        AE["execute_step()<br/>Call sandbox tools"]
         A --> AG
         A --> AE
     end
 
-    subgraph tools_mod["tools crate — 沙箱工具"]
+    subgraph tools_mod["tools crate — Sandbox Tools"]
         S["Sandbox"]
         SR["read_file()"]
         SW["write_file()"]
@@ -55,12 +55,12 @@ flowchart TB
         S --> SC
     end
 
-    subgraph tui_mod["tui/ — 终端界面"]
-        T["mod.rs<br/>事件循环"]
-        TH["handlers.rs<br/>按键处理"]
-        TR["render.rs<br/>绘制面板"]
-        TS["state.rs<br/>App 状态"]
-        TT["theme.rs<br/>主题配色"]
+    subgraph tui_mod["tui/ — Terminal UI"]
+        T["mod.rs<br/>Event loop"]
+        TH["handlers.rs<br/>Key handling"]
+        TR["render.rs<br/>Panel rendering"]
+        TS["state.rs<br/>App state"]
+        TT["theme.rs<br/>Theme colors"]
         T --> TH
         T --> TR
         T --> TS
@@ -69,61 +69,61 @@ flowchart TB
         TS --> TT
     end
 
-    M -- "mpsc 通道" --> A
-    M -- "mpsc 通道" --> T
+    M -- "mpsc channel" --> A
+    M -- "mpsc channel" --> T
     A -- "Arc<Sandbox>" --> S
-    AE -- "工具调用" --> S
+    AE -- "tool calls" --> S
     T -- "UnboundedSender" --> A
     A -- "AgentUpdate" --> T
 ```
 
 ---
 
-## 2. Agent 任务执行流程图
+## 2. Agent Task Execution Flow
 
 ```mermaid
 sequenceDiagram
-    actor U as 用户
-    participant TUI as TUI 模块
-    participant Agent as Agent 模块
-    participant LLM as OpenAI API
+    actor U as User
+    participant TUI as TUI Module
+    participant Agent as Agent Module
+    participant LLM as LLM API
     participant SB as Sandbox
 
-    U ->> TUI: 输入任务并回车
+    U ->> TUI: Enter task and press Enter
     TUI ->> Agent: UserCommand::SubmitTask
     Agent ->> LLM: generate_plan(task)
-    LLM -->> Agent: JSON 计划数组
+    LLM -->> Agent: JSON plan array
     Agent ->> TUI: AgentUpdate::PlanGenerated
 
-    loop 逐歩执行
+    loop Execute step by step
         Agent ->> TUI: AgentUpdate::StepStarted(idx)
         alt need_approval = true
             Agent ->> TUI: AgentUpdate::NeedApproval
-            TUI ->> U: 显示审批提示 (y/n)
+            TUI ->> U: Show approval prompt (y/n)
             U -->> TUI: y / n
             TUI -->> Agent: oneshot::Sender<bool>
-            alt 用户拒绝
+            alt User rejects
                 Agent ->> TUI: AgentUpdate::StepFailed
-                Note over Agent,TUI: 终止任务
+                Note over Agent,TUI: Terminate task
             end
         end
         Agent ->> SB: execute_step(step)
-        SB -->> Agent: 结果 / 错误
-        alt 执行成功
+        SB -->> Agent: Result / Error
+        alt Execution succeeded
             Agent ->> TUI: AgentUpdate::StepFinished
-        else 执行失败
+        else Execution failed
             Agent ->> TUI: AgentUpdate::StepFailed
-            Note over Agent,TUI: 终止任务
+            Note over Agent,TUI: Terminate task
         end
     end
 
     Agent ->> TUI: AgentUpdate::TaskComplete
-    TUI ->> U: 显示完成消息
+    TUI ->> U: Show completion message
 ```
 
 ---
 
-## 3. TUI 渲染布局图
+## 3. TUI Render Layout
 
 ```mermaid
 block-beta
@@ -131,16 +131,16 @@ block-beta
     space
     block:status
         columns 1
-        status_bar["Status Bar (高度 1)"]
+        status_bar["Status Bar (height 1)"]
     end
     block:main
         columns 2
-        plan["Plan Panel<br/>(40% 宽度)<br/>执行计划列表<br/>▼ 展开 / ▶ 折叠"]
-        log["Log Panel<br/>(60% 宽度)<br/>消息滚动区域<br/>支持搜索高亮"]
+        plan["Plan Panel<br/>(40% width)<br/>Execution plan list<br/>▼ expanded / ▶ collapsed"]
+        log["Log Panel<br/>(60% width)<br/>Message scroll area<br/>Supports search highlight"]
     end
     block:input
         columns 1
-        input_box["Input Box (高度 3)<br/>Insert 模式: 任务输入<br/>Command 模式: :cmd<br/>Search 模式: /term"]
+        input_box["Input Box (height 3)<br/>Insert mode: task input<br/>Command mode: :cmd<br/>Search mode: /term"]
     end
     space
 
@@ -150,7 +150,7 @@ block-beta
     style input_box fill:#2e3440,color:#eceff4
 ```
 
-### 覆盖层（弹出面板）
+### Overlays (popup panels)
 
 ```mermaid
 block-beta
@@ -158,9 +158,9 @@ block-beta
     space
     block:overlay
         columns 1
-        help["Help Panel<br/>键盘快捷键一览"]
-        history["History Panel<br/>任务历史记录"]
-        palette["Command Palette<br/>过滤命令列表"]
+        help["Help Panel<br/>Keyboard shortcuts reference"]
+        history["History Panel<br/>Task history"]
+        palette["Command Palette<br/>Filterable command list"]
     end
     space
 
@@ -171,27 +171,27 @@ block-beta
 
 ---
 
-## 4. 事件循环流程图
+## 4. Event Loop Flow
 
 ```mermaid
 flowchart TD
-    Start([启动 TUI]) --> Init["enable_raw_mode<br/>EnterAlternateScreen"]
-    Init --> InitApp["初始化 App 状态"]
-    InitApp --> LoopStart{主循环}
+    Start([Start TUI]) --> Init["enable_raw_mode<br/>EnterAlternateScreen"]
+    Init --> InitApp["Initialize App state"]
+    InitApp --> LoopStart{Main loop}
 
-    LoopStart --> Draw["terminal.draw()<br/>渲染所有面板"]
-    Draw --> PollAgent["try_recv()<br/>消费 Agent 更新"]
-    PollAgent --> PollEvent["event::poll(50ms)<br/>检测终端事件"]
+    LoopStart --> Draw["terminal.draw()<br/>Render all panels"]
+    Draw --> PollAgent["try_recv()<br/>Consume Agent updates"]
+    PollAgent --> PollEvent["event::poll(50ms)<br/>Detect terminal events"]
 
-    PollEvent -- "无事件" --> CheckQuit{should_quit?}
-    PollEvent -- "有事件" --> HandleEvent["处理 Key / Mouse / Resize"]
+    PollEvent -- "No event" --> CheckQuit{should_quit?}
+    PollEvent -- "Event received" --> HandleEvent["Handle Key / Mouse / Resize"]
 
-    HandleEvent --> KeyCheck{按键类型?}
+    HandleEvent --> KeyCheck{Key type?}
     KeyCheck -- "Ctrl+C" --> SetQuit["should_quit = true"]
     KeyCheck -- "Ctrl+H" --> ToggleHist["toggle show_history"]
     KeyCheck -- "Ctrl+T" --> ToggleTheme["toggle_theme()"]
     KeyCheck -- "Ctrl+?" --> ToggleHelp["toggle show_help"]
-    KeyCheck -- "普通按键" --> ModeDispatch["按 input_mode 分发"]
+    KeyCheck -- "Regular key" --> ModeDispatch["Dispatch by input_mode"]
 
     ModeDispatch --> Normal["handle_normal_mode()"]
     ModeDispatch --> Insert["handle_insert_mode()"]
@@ -199,8 +199,8 @@ flowchart TD
     ModeDispatch --> Search["handle_search_mode()"]
     ModeDispatch --> Palette["handle_palette_mode()"]
 
-    HandleEvent --> Mouse["Mouse 事件:<br/>滚轮滚动 / 拖拽选择"]
-    HandleEvent --> Resize["Resize 事件:<br/>重新计算布局"]
+    HandleEvent --> Mouse["Mouse event:<br/>scroll wheel / drag select"]
+    HandleEvent --> Resize["Resize event:<br/>recalculate layout"]
 
     SetQuit --> CheckQuit
     ToggleHist --> CheckQuit
@@ -214,38 +214,38 @@ flowchart TD
     Mouse --> CheckQuit
     Resize --> CheckQuit
 
-    CheckQuit -- "否" --> LoopStart
-    CheckQuit -- "是" --> Cleanup["disable_raw_mode<br/>LeaveAlternateScreen"]
-    Cleanup --> End([退出])
+    CheckQuit -- "No" --> LoopStart
+    CheckQuit -- "Yes" --> Cleanup["disable_raw_mode<br/>LeaveAlternateScreen"]
+    Cleanup --> End([Exit])
 ```
 
 ---
 
-## 5. 通道通信架构图
+## 5. Channel Communication Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Channels["Tokio MPSC 通道"]
+    subgraph Channels["Tokio MPSC Channels"]
         direction LR
-        TX1["ui_tx<br/>(UnboundedSender<AgentUpdate>)"]
-        RX1["agent_rx<br/>(UnboundedReceiver<AgentUpdate>)"]
-        TX2["user_cmd_tx<br/>(UnboundedSender<UserCommand>)"]
-        RX2["cmd_rx<br/>(UnboundedReceiver<UserCommand>)"]
+        TX1["ui_tx<br/>(UnboundedSender&lt;AgentUpdate&gt;)"]
+        RX1["agent_rx<br/>(UnboundedReceiver&lt;AgentUpdate&gt;)"]
+        TX2["user_cmd_tx<br/>(UnboundedSender&lt;UserCommand&gt;)"]
+        RX2["cmd_rx<br/>(UnboundedReceiver&lt;UserCommand&gt;)"]
     end
 
-    subgraph AgentTask["Agent 异步任务"]
+    subgraph AgentTask["Agent async task"]
         A["Agent"]
     end
 
-    subgraph MainThread["主线程"]
-        TUI["TUI 事件循环"]
+    subgraph MainThread["Main thread"]
+        TUI["TUI event loop"]
     end
 
-    A -- "发送状态更新" --> TX1
+    A -- "Send status updates" --> TX1
     TX1 -- "AgentUpdate" --> RX1
     RX1 --> TUI
 
-    TUI -- "发送用户命令" --> TX2
+    TUI -- "Send user commands" --> TX2
     TX2 -- "UserCommand" --> RX2
     RX2 --> A
 
@@ -257,30 +257,30 @@ flowchart LR
 
 ---
 
-## 6. 沙箱安全路径处理流程
+## 6. Sandbox Safe Path Resolution
 
 ```mermaid
 flowchart TD
-    Input["safe_path(relative_path)"] --> Filter["过滤路径组件:<br/>- 保留 Normal<br/>- 弹出 ParentDir(..)<br/>- 忽略 RootDir / Prefix"]
-    Filter --> Join["拼接 workspace_root"]
-    Join --> Exist{"文件/目录<br/>是否存在?"}
+    Input["safe_path(relative_path)"] --> Filter["Filter path components:<br/>- Keep Normal<br/>- Pop ParentDir(..)<br/>- Ignore RootDir / Prefix"]
+    Filter --> Join["Join with workspace_root"]
+    Join --> Exist{"File/directory<br/>exists?"}
 
-    Exist -- "存在" --> Canonical["canonicalize()<br/>解析符号链接"]
-    Exist -- "不存在" --> ParentExist{"父目录<br/>是否存在?"}
+    Exist -- "Yes" --> Canonical["canonicalize()<br/>Resolve symlinks"]
+    Exist -- "No" --> ParentExist{"Parent directory<br/>exists?"}
 
-    ParentExist -- "存在" --> ParentCano["parent.canonicalize()<br/>+ file_name"]
-    ParentExist -- "不存在" --> PrefixCheck{"starts_with<br/>workspace_root?"}
+    ParentExist -- "Yes" --> ParentCano["parent.canonicalize()<br/>+ file_name"]
+    ParentExist -- "No" --> PrefixCheck{"starts_with<br/>workspace_root?"}
 
-    PrefixCheck -- "否" --> Err1["返回错误:<br/>Path escapes workspace"]
-    PrefixCheck -- "是" --> Return1["返回 full 路径"]
+    PrefixCheck -- "No" --> Err1["Return error:<br/>Path escapes workspace"]
+    PrefixCheck -- "Yes" --> Return1["Return full path"]
 
     Canonical --> Check{"starts_with<br/>canonical_root?"}
     ParentCano --> Check
 
-    Check -- "否" --> Err2["返回错误:<br/>Path escapes workspace"]
-    Check -- "是" --> Return2["返回 safe PathBuf"]
+    Check -- "No" --> Err2["Return error:<br/>Path escapes workspace"]
+    Check -- "Yes" --> Return2["Return safe PathBuf"]
 
-    Err1 --> End([结束])
+    Err1 --> End([End])
     Err2 --> End
     Return1 --> End
     Return2 --> End

@@ -1,8 +1,8 @@
 use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-/// 将单行文本在指定显示宽度处拆分，返回 (前缀, 剩余)。
-/// 前缀的显示宽度 ≤ max_width。
+/// Split a single line of text at the specified display width, returning (prefix, remainder).
+/// The prefix display width ≤ max_width.
 fn split_at_display_width(text: &str, max_width: usize) -> (&str, &str) {
     if text.is_empty() || max_width == 0 {
         return ("", text);
@@ -18,8 +18,8 @@ fn split_at_display_width(text: &str, max_width: usize) -> (&str, &str) {
     (text, "")
 }
 
-/// 将一条 styled Line 按显示宽度拆分为多条不超出 max_width 的 Line。
-/// 子行继承首段 span 的样式；对于多 span 行保留主导样式。
+/// Split a styled Line by display width into multiple Lines not exceeding max_width.
+/// Child lines inherit the first span's style; dominant style preserved for multi-span lines.
 pub(crate) fn wrap_line(line: &Line<'_>, max_width: usize) -> Vec<Line<'static>> {
     let text: String = line
         .spans

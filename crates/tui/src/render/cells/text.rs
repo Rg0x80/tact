@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use crate::render::renderable::Renderable;
 use crate::render::util::wrap_line;
 
-/// 将单行 span 写入 buffer。
+/// Writes a single-line span into the buffer.
 fn render_line(line: &Line, x: u16, y: u16, width: u16, buf: &mut Buffer) {
     let mut col = x;
     for span in &line.spans {
@@ -19,24 +19,24 @@ fn render_line(line: &Line, x: u16, y: u16, width: u16, buf: &mut Buffer) {
     }
 }
 
-/// 单条日志消息的渲染单元。
-/// 预缓存折行结果，支持搜索高亮和鼠标选区。
+/// Rendering unit for a single log message.
+/// Pre-cached line wrapping result, supporting search highlights and mouse selections.
 pub(crate) struct TextCell {
-    /// 预折行的视觉行（普通渲染时直接 clone）。
+    /// Pre-wrapped visual lines (cloned directly during normal rendering).
     cached_lines: Vec<Line<'static>>,
-    /// 原始文本（搜索高亮时用）。
+    /// Raw text (used for search highlighting).
     raw_text: String,
-    /// 搜索词。
+    /// Search term.
     search_term: String,
-    /// 是否为搜索命中行。
+    /// Whether this line is a search match.
     is_search_match: bool,
-    /// 是否被鼠标选中。
+    /// Whether this line is selected by mouse.
     is_selected: bool,
-    /// 词级选区 (start_byte, end_byte)，None 表示行级选区。
+    /// Word-level selection (start_byte, end_byte); None means line-level selection.
     word_selection: Option<(usize, usize)>,
-    /// 首行前缀（thinking block 折叠指示符）。
+    /// First line prefix (thinking block collapse indicator).
     prefix: Option<String>,
-    /// 普通前景色。
+    /// Normal foreground color.
     fg_color: Color,
 }
 
@@ -64,7 +64,7 @@ impl TextCell {
         }
     }
 
-    /// 构建渲染用的视觉行列表（根据状态选择搜索高亮/选区/缓存）。
+    /// Build the visual line list for rendering (chooses search highlight/selection/cache based on state).
     fn build_lines(&self, wrap_width: u16) -> Vec<Line<'_>> {
         if self.is_search_match {
             return self.build_highlighted_line(wrap_width);
@@ -161,7 +161,7 @@ impl Renderable for TextCell {
                 break;
             }
             let mut line = line.clone();
-            // 只在 cell 首行（i == 0）添加 prefix
+            // Only add prefix on the first line of the cell (i == 0)
             if i == 0 {
                 if let Some(ref prefix) = self.prefix {
                     if let Some(first) = line.spans.first_mut() {

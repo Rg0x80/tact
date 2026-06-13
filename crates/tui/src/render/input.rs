@@ -8,7 +8,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-/// 渲染命令行输入（Search / Palette 模式）。
+/// Render command-line input (Search / Palette mode).
 pub(crate) fn render_command_line(frame: &mut Frame, area: Rect, app: &App) {
     let prefix = match app.input_mode {
         InputMode::Search => "/",
@@ -32,7 +32,7 @@ pub(crate) fn render_command_line(frame: &mut Frame, area: Rect, app: &App) {
     frame.set_cursor_position((cursor_pos, area.y + 1));
 }
 
-/// 渲染主输入框（Insert 模式），或转接到命令行渲染。
+/// Render the main input box (Insert mode), or delegate to command-line rendering.
 pub(crate) fn render_input_box(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.input_mode == InputMode::Search || app.input_mode == InputMode::Palette {
         render_command_line(frame, area, app);

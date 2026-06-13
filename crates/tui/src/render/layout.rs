@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
 };
 
-/// 主内容区域布局，根据当前显示状态切换历史、帮助或 Plan+Log 双栏布局。
+/// Main content area layout, switching between history, help, or Plan+Log dual-panel based on current display state.
 pub(crate) fn render_main_area(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.show_history {
         super::popups::history::render_history_panel(frame, area, app);

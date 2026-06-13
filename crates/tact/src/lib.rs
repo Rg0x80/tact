@@ -683,7 +683,7 @@ impl Agent {
             transcript_path.display()
         )));
 
-        // 优先保留最近的消息（而不是最早的消息），因为最近的上下文对继续工作最重要
+        // Prefer recent messages (rather than earliest), since recent context matters most for continuing work
         let truncated = if self.runtime.context.is_empty() {
             String::new()
         } else {
@@ -692,7 +692,7 @@ impl Agent {
             for msg in self.runtime.context.iter().rev() {
                 let msg_json = serde_json::to_string(msg).unwrap_or_default();
                 let msg_chars = msg_json.chars().count();
-                // 至少保留一条消息，即使它很长
+                // Keep at least one message, even if it's long
                 if char_count + msg_chars > 80_000 && !recent_messages.is_empty() {
                     break;
                 }
@@ -792,7 +792,7 @@ Be compact but concrete. Preserve exact file paths, function names, and type sig
         self.runtime.compact_state.has_compacted = true;
         self.runtime.compact_state.last_summary = Some(summary.clone());
 
-        // 在 summary 中注入最近访问的文件列表，帮助 agent 在失忆后快速恢复上下文
+        // Inject recently accessed file list into summary, helping the agent recover context after amnesia
         let mut full_summary = summary;
         if !self.runtime.compact_state.recent_files.is_empty() {
             full_summary

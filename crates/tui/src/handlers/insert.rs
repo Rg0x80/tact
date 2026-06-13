@@ -51,11 +51,11 @@ pub(crate) fn handle_insert_mode(
                 app.plan.list_state = ListState::default();
                 app.plan.scroll_state = ScrollbarState::new(0);
                 app.task_start_time = Some(chrono::Local::now());
-                // 发送命令给agent
+                // Send command to agent
                 let _ = user_cmd_tx.send(UserCommand::SubmitTask(task));
             }
         }
-        // 快速删除单词
+        // Quick word delete
         KeyCode::Char('w')
             if key
                 .modifiers
@@ -82,7 +82,7 @@ pub(crate) fn handle_insert_mode(
                 app.input_cursor = pos;
             }
         }
-        // Ctrl+A: 跳转到输入开头
+        // Ctrl+A: jump to input start
         KeyCode::Char('a')
             if key
                 .modifiers
@@ -90,7 +90,7 @@ pub(crate) fn handle_insert_mode(
         {
             app.input_cursor = 0;
         }
-        // Ctrl+E: 跳转到输入末尾
+        // Ctrl+E: jump to input end
         KeyCode::Char('e')
             if key
                 .modifiers
@@ -98,7 +98,7 @@ pub(crate) fn handle_insert_mode(
         {
             app.input_cursor = app.input.len();
         }
-        // Ctrl+K: 删除到行尾（kill-line），若光标在行尾则删除换行符以合并下行
+        // Ctrl+K: kill to end of line; if cursor is at end of line, delete newline to merge with next line
         KeyCode::Char('k')
             if key
                 .modifiers
@@ -122,7 +122,7 @@ pub(crate) fn handle_insert_mode(
                 app.input.drain(app.input_cursor..pos);
             }
         }
-        // Ctrl+U: 删除到行首
+        // Ctrl+U: kill to beginning of line
         KeyCode::Char('u')
             if key
                 .modifiers
@@ -136,7 +136,7 @@ pub(crate) fn handle_insert_mode(
             app.input.drain(start..app.input_cursor);
             app.input_cursor = start;
         }
-        // Ctrl+D: 删除光标后一个字符（仅当输入非空时）
+        // Ctrl+D: delete character after cursor (only when input is non-empty)
         KeyCode::Char('d')
             if key
                 .modifiers
@@ -149,7 +149,7 @@ pub(crate) fn handle_insert_mode(
                 app.input.drain(app.input_cursor..next);
             }
         }
-        // Ctrl+Home: 跳转到输入开头
+        // Ctrl+Home: jump to input start
         KeyCode::Home
             if key
                 .modifiers
@@ -157,7 +157,7 @@ pub(crate) fn handle_insert_mode(
         {
             app.input_cursor = 0;
         }
-        // Ctrl+End: 跳转到输入末尾
+        // Ctrl+End: jump to input end
         KeyCode::End
             if key
                 .modifiers
@@ -165,7 +165,7 @@ pub(crate) fn handle_insert_mode(
         {
             app.input_cursor = app.input.len();
         }
-        // Ctrl+Backspace: 删除前一个单词（与 Ctrl+W / Alt+Backspace 一致）
+        // Ctrl+Backspace: delete previous word (consistent with Ctrl+W / Alt+Backspace)
         KeyCode::Backspace
             if key
                 .modifiers
@@ -179,7 +179,7 @@ pub(crate) fn handle_insert_mode(
                 app.input_cursor = pos;
             }
         }
-        // Ctrl+P: 历史向前（不受光标行位置限制）
+        // Ctrl+P: history back (unrestricted by cursor line position)
         KeyCode::Char('p')
             if key
                 .modifiers
@@ -200,7 +200,7 @@ pub(crate) fn handle_insert_mode(
                 }
             }
         }
-        // Ctrl+N: 历史向后（不受光标行位置限制）
+        // Ctrl+N: history forward (unrestricted by cursor line position)
         KeyCode::Char('n')
             if key
                 .modifiers
@@ -272,7 +272,7 @@ pub(crate) fn handle_insert_mode(
                 app.input.remove(app.input_cursor);
             }
         }
-        // 快速移动游标（按单词）
+        // Quick cursor movement (by word)
         KeyCode::Left
             if key
                 .modifiers

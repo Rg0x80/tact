@@ -1,27 +1,27 @@
 use ratatui::text::Line;
 use ratatui::widgets::ScrollbarState;
 
-/// 日志面板滚动状态，管理滚动偏移、滚动条、面板高度和视觉行映射。
+/// Log panel scroll state: manages scroll offset, scrollbar, panel height, and visual line mapping.
 pub(crate) struct LogScroll {
-    /// 当前滚动偏移量。
+    /// Current scroll offset.
     pub(crate) offset: u16,
-    /// 滚动条状态。
+    /// Scrollbar state.
     pub(crate) state: ScrollbarState,
-    /// 面板高度。
+    /// Panel height.
     pub(crate) height: u16,
-    /// 视觉行起始索引列表。
+    /// Visual line starting index list.
     pub(crate) visual_start: Vec<usize>,
-    /// 缓存的视觉行（wrap_line 结果，不含搜索/选择样式）。
+    /// Cached visual lines (wrap_line results, excluding search/selection styles).
     pub(crate) visual_cache: Vec<Line<'static>>,
-    /// 缓存的逻辑→视觉映射（visual_cache 的起始索引）。
+    /// Cached logical→visual mapping (visual_cache start indices).
     pub(crate) visual_start_cache: Vec<usize>,
-    /// 缓存的视觉行宽度。
+    /// Cached visual line width.
     pub(crate) visual_cache_width: u16,
-    /// 上次构建缓存时的 messages.len()，变动则失效。
+    /// messages.len() when cache was last built; invalidated on change.
     pub(crate) visual_cache_ver: usize,
-    /// visible_indices 上次构建时的 messages.len()。
+    /// messages.len() when visible_indices was last built.
     pub(crate) visible_indices_ver: usize,
-    /// physical → logical 反向映射缓存（用 Option 处理不可见行）。
+    /// physical → logical reverse mapping cache (uses Option for invisible lines).
     pub(crate) phys_to_logical_cache: Vec<Option<usize>>,
 }
 

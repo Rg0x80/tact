@@ -25,13 +25,13 @@ impl App {
         self.show_history = false;
     }
 
-    // 添加一个空行作为分隔符，用于在日志中区分不同的输入/输出块。
+    // Add a blank line as separator to distinguish different input/output blocks in the log.
     pub(crate) fn add_new_line(&mut self) {
         self.messages.push(Line::from(""));
         self.raw_messages.push(String::new());
     }
 
-    /// 打开 thinking 弹窗，根据点击的 thinking 块标题行索引来定位块。
+    /// Open the thinking popup, locating the block by its title line index.
     pub(crate) fn open_thinking_popup(&mut self, title_idx: usize) {
         if let Some((bi, block)) = self
             .thinking
@@ -49,26 +49,27 @@ impl App {
         }
     }
 
-    /// 关闭 thinking 弹窗。
+    /// Close the thinking popup.
     pub(crate) fn close_thinking_popup(&mut self) {
         self.thinking.popup = None;
     }
 
-    /// 弹窗内向上滚动。
+    /// Scroll up within the popup.
     pub(crate) fn thinking_popup_scroll_up(&mut self) {
         if let Some(ref mut popup) = self.thinking.popup {
             popup.scroll = popup.scroll.saturating_sub(1);
         }
     }
 
-    /// 弹窗内向下滚动（上限由渲染时的实际行数限制）。
+    /// Scroll down within the popup (upper bound clamped by actual line count during render).
     pub(crate) fn thinking_popup_scroll_down(&mut self) {
         if let Some(ref mut popup) = self.thinking.popup {
             popup.scroll = popup.scroll.saturating_add(1);
         }
     }
 
-    /// 查找包含指定逻辑行号的代码块（返回逻辑行号范围，含首尾 ``` 标记行）。
+    /// Find the code block containing the given logical line number.
+    /// Returns (logical_start, logical_end) including the opening and closing ``` markers.
     pub(crate) fn find_code_block_containing_logical(
         &self,
         target_logical: usize,
@@ -98,11 +99,11 @@ impl App {
         None
     }
 
-    /// 从 raw_messages 中查找最后一个完整代码块的内容（不含 ``` 标记）。
-    /// 返回 None 表示没有找到闭合的代码块。
+    /// Extract the content of the last complete code block from raw_messages (without ``` markers).
+    /// Returns None if no closed code block is found.
     pub(crate) fn extract_last_code_block(&self) -> Option<String> {
         let raw = &self.raw_messages;
-        // 从末尾向前查找闭合的 ```
+        // Search backwards for a closing ```
         let mut end = raw.len();
         loop {
             if end == 0 {
@@ -113,7 +114,7 @@ impl App {
                 break;
             }
         }
-        // 从闭合 ``` 之前向前查找开头的 ```lang
+        // Search backwards from the closing ``` for an opening ```lang
         let mut start = end;
         loop {
             if start == 0 {
@@ -121,7 +122,7 @@ impl App {
             }
             start -= 1;
             if raw[start].trim_start().starts_with("```") {
-                // 提取内容行（不含首尾 ``` 标记）
+                // Extract content lines (excluding opening and closing ``` markers)
                 let content: Vec<&str> = raw[start + 1..end].iter().map(|s| s.as_str()).collect();
                 return if content.is_empty() {
                     None
@@ -132,7 +133,7 @@ impl App {
         }
     }
 
-    /// 复制当前 thinking 弹窗的完整内容到剪贴板。
+    /// Copy the full content of the current thinking popup to the clipboard.
     pub(crate) fn copy_thinking_popup(&mut self) {
         let popup = match &self.thinking.popup {
             Some(p) => p,
@@ -149,7 +150,7 @@ impl App {
             text.clone()
         };
 
-        // 1. 尝试原生剪贴板
+        // 1. Try native clipboard
         if let Ok(mut clip) = Clipboard::new()
             && clip.set_text(&text).is_ok()
         {
@@ -157,7 +158,7 @@ impl App {
             return;
         }
 
-        // 2. 回退：OSC 52 终端剪贴板
+        // 2. Fallback: OSC 52 terminal clipboard
         let encoded = BASE64.encode(&text);
         let osc52 = format!("\x1b]52;c;{}\x07", encoded);
         if std::io::Write::write_all(&mut std::io::stdout(), osc52.as_bytes()).is_ok() {
@@ -165,7 +166,7 @@ impl App {
             return;
         }
 
-        // 3. 最后手段：保存到内部缓冲区
+        // 3. Last resort: save to internal buffer
         self.clipboard_buffer = text;
         self.add_system_message(format!(
             "📋 Copied to internal buffer (clipboard unavailable): {}",
@@ -174,7 +175,7 @@ impl App {
         self.thinking.popup = None;
     }
 
-    /// 打开文件内容弹窗，接受 diff 块首行索引。
+    /// Open a file content popup, accepting the diff block's starting line index.
     pub(crate) fn open_diff_popup(&mut self, start_idx: usize) {
         if let Some((bi, block)) = self
             .diff_blocks
@@ -191,26 +192,26 @@ impl App {
         }
     }
 
-    /// 关闭文件内容弹窗。
+    /// Close the file content popup.
     pub(crate) fn close_diff_popup(&mut self) {
         self.diff_popup = None;
     }
 
-    /// 弹窗内向上滚动。
+    /// Scroll up within the popup.
     pub(crate) fn diff_popup_scroll_up(&mut self) {
         if let Some(ref mut popup) = self.diff_popup {
             popup.scroll = popup.scroll.saturating_sub(1);
         }
     }
 
-    /// 弹窗内向下滚动（上限由渲染时的实际行数限制）。
+    /// Scroll down within the popup (upper bound clamped by actual line count during render).
     pub(crate) fn diff_popup_scroll_down(&mut self) {
         if let Some(ref mut popup) = self.diff_popup {
             popup.scroll = popup.scroll.saturating_add(1);
         }
     }
 
-    /// 复制弹窗文件内容到剪贴板。
+    /// Copy the popup file content to the clipboard.
     pub(crate) fn copy_diff_popup(&mut self) {
         let popup = match &self.diff_popup {
             Some(p) => p,
@@ -245,7 +246,7 @@ impl App {
 
     // ========== Code Popup ==========
 
-    /// 打开代码块弹窗。
+    /// Open the code block popup.
     pub(crate) fn open_code_popup(&mut self, block_idx: usize) {
         if block_idx < self.code_blocks.len() {
             let block = &self.code_blocks[block_idx];
@@ -257,26 +258,26 @@ impl App {
         }
     }
 
-    /// 关闭代码块弹窗。
+    /// Close the code block popup.
     pub(crate) fn close_code_popup(&mut self) {
         self.code_popup = None;
     }
 
-    /// 弹窗内向上滚动。
+    /// Scroll up within the popup.
     pub(crate) fn code_popup_scroll_up(&mut self) {
         if let Some(ref mut popup) = self.code_popup {
             popup.scroll = popup.scroll.saturating_sub(1);
         }
     }
 
-    /// 弹窗内向下滚动（上限由渲染时的实际行数限制）。
+    /// Scroll down within the popup (upper bound clamped by actual line count during render).
     pub(crate) fn code_popup_scroll_down(&mut self) {
         if let Some(ref mut popup) = self.code_popup {
             popup.scroll = popup.scroll.saturating_add(1);
         }
     }
 
-    /// 复制弹窗代码内容到剪贴板。
+    /// Copy the popup code content to the clipboard.
     pub(crate) fn copy_code_popup(&mut self) {
         let popup = match &self.code_popup {
             Some(p) => p,
@@ -310,4 +311,3 @@ impl App {
         self.code_popup = None;
     }
 }
-

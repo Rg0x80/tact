@@ -1,4 +1,4 @@
-/// 流式输出状态，管理行缓冲、表格缓冲、段落缓冲和代码块缓冲。
+/// Streaming output state: manages line buffer, table buffer, paragraph buffer, and code block buffer.
 pub(crate) struct StreamState {
     pub(crate) buffer: String,
     pub(crate) table_buffer: Vec<String>,

@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-/// 渲染 thinking block 卡片叠层。
+/// Render thinking block card overlay.
 pub(crate) fn render_thinking_cards(
     frame: &mut Frame,
     area: Rect,

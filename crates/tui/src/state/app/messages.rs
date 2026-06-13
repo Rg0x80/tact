@@ -46,7 +46,7 @@ impl App {
         self.add_new_line();
     }
 
-    /// 保存当前输入状态到 undo 栈，并清空 redo 栈。最多保留 100 条快照。
+    /// Save current input state to undo stack and clear redo stack. Max 100 snapshots retained.
     pub(crate) fn save_undo(&mut self) {
         self.redo_stack.clear();
         self.undo_stack.push((self.input.clone(), self.input_cursor));
@@ -55,8 +55,8 @@ impl App {
         }
     }
 
-    /// 添加一条系统消息，根据前缀自动着色，并更新滚动位置。
-    /// 非系统标记消息会被解析为 Markdown。
+    /// Add a system message, auto-color by prefix, and update scroll position.
+    /// Non-system-marker messages are parsed as Markdown.
     pub(crate) fn add_system_message(&mut self, content: String) {
         let trimmed = content.trim_start();
         let is_system = trimmed.starts_with('✓')
@@ -93,7 +93,7 @@ impl App {
         }
 
         if self.input_mode == InputMode::Insert || self.input_mode == InputMode::Normal {
-            // u16::MAX 会被 render_log_panel 按视觉行数正确裁剪
+            // u16::MAX is correctly clipped by render_log_panel based on visual line count
             self.log_scroll.offset = u16::MAX;
         }
         if !self.search.term.is_empty() {
@@ -101,9 +101,9 @@ impl App {
         }
     }
 
-    /// 添加一条用户输入消息，同时将其记录到任务历史中。
+    /// Add a user input message and record it in task history.
     pub(crate) fn add_user_message(&mut self, content: String) {
-        // 先插入一个空行作为分隔
+        // Insert a blank line as separator first
         self.add_new_line();
         let mut is_first = true;
         let msgs = self.msgs();

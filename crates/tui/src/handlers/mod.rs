@@ -25,7 +25,7 @@ use tokio::sync::mpsc::UnboundedSender;
 fn copy_text(app: &mut App, text: &str) {
     let preview = text.chars().take(40).collect::<String>();
 
-    // 1. 尝试原生剪贴板
+    // 1. Try native clipboard
     if let Ok(mut clip) = Clipboard::new() {
         if clip.set_text(text).is_ok() {
             let msgs = app.msgs();
@@ -34,7 +34,7 @@ fn copy_text(app: &mut App, text: &str) {
         }
     }
 
-    // 2. 回退：OSC 52 终端剪贴板（适用于 SSH / tmux 等场景）
+    // 2. Fallback: OSC 52 terminal clipboard (for SSH / tmux scenarios)
     let encoded = BASE64.encode(text);
     let osc52 = format!("\x1b]52;c;{}\x07", encoded);
     if std::io::Write::write_all(&mut std::io::stdout(), osc52.as_bytes()).is_ok() {
@@ -43,13 +43,13 @@ fn copy_text(app: &mut App, text: &str) {
         return;
     }
 
-    // 3. 最后手段：保存到内部缓冲区
+    // 3. Last resort: save to internal buffer
     app.clipboard_buffer = text.to_string();
     let msgs = app.msgs();
     app.add_system_message(msgs.copied_internal_tmpl.replace("{}", &preview));
 }
 
-/// 返回指定字节位置前一个字符的起始字节索引。
+/// Returns the byte index of the previous char boundary before `cursor`.
 fn prev_char_boundary(s: &str, cursor: usize) -> usize {
     s[..cursor]
         .char_indices()
@@ -58,7 +58,7 @@ fn prev_char_boundary(s: &str, cursor: usize) -> usize {
         .unwrap_or(0)
 }
 
-/// 返回指定字节位置后一个字符的起始字节索引。
+/// Returns the byte index of the next char boundary after `cursor`.
 fn next_char_boundary(s: &str, cursor: usize) -> usize {
     s[cursor..]
         .chars()
@@ -67,7 +67,7 @@ fn next_char_boundary(s: &str, cursor: usize) -> usize {
         .unwrap_or(cursor)
 }
 
-/// 返回光标位置所在行起始的字节索引。
+/// Returns the byte index at the start of the line that contains `cursor`.
 fn start_of_line(s: &str, cursor: usize) -> usize {
     if cursor == 0 {
         return 0;
@@ -75,18 +75,18 @@ fn start_of_line(s: &str, cursor: usize) -> usize {
     s[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0)
 }
 
-/// 返回光标位置所在行末尾的字节索引（即行尾换行符的字节位置；若为最后一行则是字符串长度）。
+/// Returns the byte index at the end of the line that contains `cursor` (newline position, or string length for the last line).
 fn end_of_line(s: &str, cursor: usize) -> usize {
     s[cursor..].find('\n').map(|i| cursor + i).unwrap_or(s.len())
 }
 
-/// 退出历史导航模式。
+/// Exit history navigation mode.
 fn exit_history(app: &mut App) {
     app.input_history.index = None;
     app.input_history.saved.clear();
 }
 
-/// 计算光标所在的 (行, 列)，列按字符计数。
+/// Compute the (line, column) of the cursor position, counting columns in characters.
 fn cursor_line_col(s: &str, cursor: usize) -> (usize, usize) {
     let mut line = 0;
     let mut col = 0;
@@ -104,7 +104,7 @@ fn cursor_line_col(s: &str, cursor: usize) -> (usize, usize) {
     (line, col)
 }
 
-/// 返回指定行的字符长度（不含换行符）。
+/// Returns the character length (excluding newline) of the given line.
 fn line_length(s: &str, target_line: usize) -> usize {
     let mut line = 0;
     let mut len = 0;
@@ -121,7 +121,7 @@ fn line_length(s: &str, target_line: usize) -> usize {
     len
 }
 
-/// 将 (行, 列) 转换为字节索引。
+/// Convert (line, column) to a byte index.
 fn line_col_to_cursor(s: &str, target_line: usize, target_col: usize) -> usize {
     let mut line = 0;
     let mut col = 0;
@@ -142,17 +142,17 @@ fn line_col_to_cursor(s: &str, target_line: usize, target_col: usize) -> usize {
     s.len()
 }
 
-/// 判断字符是否为单词字符（字母、数字、下划线）。
+/// Returns true if the character is a word character (alphanumeric or underscore).
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// 返回光标位置前一个单词的起始字节索引（向后删除词）。
+/// Returns the byte index of the word start before `cursor` (backward-delete word).
 fn prev_word_boundary(s: &str, cursor: usize) -> usize {
     let mut pos = cursor;
     let mut chars = s[..cursor].chars().rev().peekable();
 
-    // 跳过空白字符
+    // Skip whitespace
     while let Some(&c) = chars.peek() {
         if c.is_whitespace() {
             pos -= c.len_utf8();
@@ -162,7 +162,7 @@ fn prev_word_boundary(s: &str, cursor: usize) -> usize {
         }
     }
 
-    // 记录第一个非空白字符的类型，并跳过同类字符
+    // Record the type of the first non-whitespace char, then skip same-type chars
     if let Some(&first) = chars.peek() {
         if is_word_char(first) {
             while let Some(&c) = chars.peek() {
@@ -188,12 +188,12 @@ fn prev_word_boundary(s: &str, cursor: usize) -> usize {
     pos
 }
 
-/// 返回光标位置后一个单词的结束字节索引（向前删除词）。
+/// Returns the byte index of the word end after `cursor` (forward-delete word).
 fn next_word_boundary(s: &str, cursor: usize) -> usize {
     let mut pos = cursor;
     let mut chars = s[cursor..].chars().peekable();
 
-    // 跳过空白字符
+    // Skip whitespace
     while let Some(&c) = chars.peek() {
         if c.is_whitespace() {
             pos += c.len_utf8();
@@ -203,7 +203,7 @@ fn next_word_boundary(s: &str, cursor: usize) -> usize {
         }
     }
 
-    // 记录第一个非空白字符的类型，并跳过同类字符
+    // Record the type of the first non-whitespace char, then skip same-type chars
     if let Some(&first) = chars.peek() {
         if is_word_char(first) {
             while let Some(&c) = chars.peek() {
@@ -229,7 +229,7 @@ fn next_word_boundary(s: &str, cursor: usize) -> usize {
     pos
 }
 
-/// 执行命令面板中选中的命令。
+/// Execute the selected command in the command palette.
 pub(super) fn execute_palette_command(app: &mut App, cmd: &str) {
     match cmd {
         "theme" => app.toggle_theme(),

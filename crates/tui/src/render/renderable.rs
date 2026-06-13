@@ -1,16 +1,16 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-/// 可渲染单元，知道自己的视觉高度和如何绘制。
+/// Renderable unit that knows its visual height and how to draw.
 pub(crate) trait Renderable {
-    /// 在指定区域内绘制全部视觉行。
+    /// Draw all visual lines within the specified area.
     fn render(&self, area: Rect, buf: &mut Buffer);
 
-    /// 从指定行偏移开始绘制，默认实现委托给 render（忽略偏移）。
+    /// Draw starting from the specified line offset; default impl delegates to render (ignoring offset).
     fn render_partial(&self, area: Rect, buf: &mut Buffer, _skip_lines: usize) {
         self.render(area, buf);
     }
 
-    /// 在给定宽度下的视觉行数（折行后高度）。
+    /// Number of visual lines at the given width (height after wrapping).
     fn height(&self, width: u16) -> u16;
 }

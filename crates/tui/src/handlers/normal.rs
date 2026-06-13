@@ -24,7 +24,7 @@ pub(crate) fn handle_normal_mode(
         }
         KeyCode::Char('j') => match app.focused_panel {
             FocusedPanel::Log => {
-                // 不检查上限，render 会统一 clamp
+                // Don't check upper bound; render uniformly clamps
                 app.log_scroll.offset = app.log_scroll.offset.saturating_add(1);
             }
             FocusedPanel::Plan => {
@@ -54,7 +54,7 @@ pub(crate) fn handle_normal_mode(
         }
         KeyCode::Char('G') => {
             if app.focused_panel == FocusedPanel::Log {
-                // 设为一个足够大的值，render 会 clamp 到实际 max_scroll
+                // Set to a large enough value; render clamps to actual max_scroll
                 app.log_scroll.offset = u16::MAX;
             }
         }
@@ -139,7 +139,7 @@ pub(crate) fn handle_normal_mode(
                         if let Some((s, e)) = app.mouse.log_selection {
                             let start = s.min(e);
                             let end = s.max(e);
-                            // 如果有单词选择（双击），复制单词而非整行
+                            // If there's a word selection (double-click), copy word instead of entire line
                             if let Some((word_start, word_end)) =
                                 app.mouse.log_word_selection
                             {
@@ -171,7 +171,7 @@ pub(crate) fn handle_normal_mode(
                                 }
                             }
                         } else {
-                            // 最后一个可见消息
+                            // Last visible message
                             let total = app.total_log_lines();
                             if total > 0 && app.stream.buffer.is_empty() {
                                 app.visible_message_index(total - 1)
@@ -188,7 +188,7 @@ pub(crate) fn handle_normal_mode(
                     copy_text(app, &t);
                     app.add_new_line();
                 }
-                // 恢复之前的 status。WaitingForUser 已在 y/n 分支上方处理，此处无需再次恢复。
+                // Restore previous status. WaitingForUser is already handled above in the y/n branch; no need to restore again here.
                 if !matches!(old_status, Status::WaitingForUser { .. }) {
                     app.status = old_status;
                 }
@@ -203,12 +203,12 @@ pub(crate) fn handle_normal_mode(
             }
         }
         KeyCode::Char('V') => {
-            // 打开最可见的代码块弹窗
+            // Open the most visible code block popup
             if app.code_popup.is_some() {
                 app.close_code_popup();
             } else if !app.code_blocks.is_empty() && app.focused_panel == FocusedPanel::Log {
                 let logical_offset = app.log_scroll.offset as usize;
-                // 找到 start_idx 最接近当前滚动位置（且不超过）的代码块
+                // Find the code block whose start_idx is closest to (and not exceeding) the current scroll position
                 let best = app
                     .code_blocks
                     .iter()
@@ -231,11 +231,11 @@ pub(crate) fn handle_normal_mode(
             }
         }
         KeyCode::Char('t') => {
-            // 打开最近可见的 thinking 卡片弹窗
+            // Open the most recently visible thinking card popup
             if app.thinking.popup.is_some() {
                 app.close_thinking_popup();
             } else if !app.thinking.blocks.is_empty() {
-                // 找到 title_idx 最接近当前滚动位置（且不超过）的块，否则取最新
+                // Find the block whose title_idx is closest to (and not exceeding) the current scroll position; otherwise take the newest
                 let logical_offset = app.log_scroll.offset as usize;
                 let best = app
                     .thinking

@@ -7,7 +7,7 @@ use ratatui::{
 };
 use crate::state::App;
 
-/// 渲染 code block 卡片叠层。
+/// Render code block card overlay.
 pub(crate) fn render_code_cards(
     frame: &mut Frame,
     area: Rect,

@@ -5,18 +5,18 @@ use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Widget};
 use crate::state::SelectPopup;
 
-/// 选择弹窗 Widget，居中显示 prompt 和选项列表，支持键盘/鼠标选中。
+/// Selection popup widget: displays prompt and option list centered, supports keyboard/mouse selection.
 pub struct SelectPopupWidget<'a> {
     state: &'a SelectPopup,
-    /// 选中项高亮背景色。
+    /// Highlight background color for selected item.
     highlight_color: Color,
-    /// 普通选项前景色。
+    /// Normal option foreground color.
     fg_color: Color,
-    /// 弹窗背景色。
+    /// Popup background color.
     bg_color: Color,
-    /// 无选项时的提示文本。
+    /// Hint text when there are no options.
     empty_text: &'static str,
-    /// 选中项前缀箭头。
+    /// Selected item prefix arrow.
     arrow: &'static str,
 }
 
@@ -52,17 +52,17 @@ impl Widget for SelectPopupWidget<'_> {
         let popup_y = (area.height.saturating_sub(popup_height)) / 2;
         let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
 
-        // 清除弹窗区域原有内容
+        // Clear existing popup area content
         Clear.render(popup_area, buf);
 
-        // 带边框的弹窗外框
+        // Bordered popup outer frame
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" {} ", self.state.prompt))
             .style(Style::default().bg(self.bg_color));
         block.render(popup_area, buf);
 
-        // 弹窗内部区域
+        // Popup inner area
         let inner = Rect::new(
             popup_area.x + 1,
             popup_area.y + 1,
@@ -70,7 +70,7 @@ impl Widget for SelectPopupWidget<'_> {
             popup_area.height.saturating_sub(2),
         );
 
-        // 构建选项列表
+        // Build option list
         let items: Vec<ListItem> = if self.state.options.is_empty() {
             vec![ListItem::new(Span::styled(
                 self.empty_text,

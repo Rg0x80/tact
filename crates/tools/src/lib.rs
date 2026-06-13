@@ -1,24 +1,25 @@
-// 沙箱工具模块
-// 提供受限的文件读写和命令执行能力，防止 Agent 操作逃逸出指定工作目录。
+// Sandbox tools module
+// Provides restricted file I/O and command execution capabilities,
+// preventing the Agent from escaping the designated working directory.
 
 use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
 
-/// 沙箱结构体，限制所有文件与命令操作在 `workspace_root` 范围内。
+/// Sandbox struct — restricts all file and command operations within `workspace_root`.
 pub struct Sandbox {
-    /// 工作空间根目录（原始路径）
+    /// Workspace root directory (original path)
     workspace_root: PathBuf,
-    /// 规范化后的绝对路径（用于最终校验）
+    /// Canonicalized absolute path (used for final validation)
     canonical_root: PathBuf,
-    /// 允许执行的命令白名单
+    /// Allowlist of permitted commands
     allowed_commands: Vec<String>,
 }
 
 impl Sandbox {
     pub fn new(workspace_root: PathBuf, allowed_commands: Vec<String>) -> Self {
-        // canonicalize 解析符号链接，得到真实的绝对路径
+        // canonicalize resolves symlinks to get the real absolute path
         let canonical_root = workspace_root
             .canonicalize()
             .unwrap_or_else(|_| workspace_root.clone());
@@ -29,10 +30,10 @@ impl Sandbox {
         }
     }
 
-    /// 路径安全检查：
-    /// 1. 过滤 `..` 和根目录/前缀组件，防止目录遍历攻击
-    /// 2. 解析符号链接，防止通过软链接逃逸沙箱
-    /// 3. 最终校验规范化后的路径是否仍在 `canonical_root` 之内
+    /// Path safety check:
+    /// 1. Filter `..` and root/prefix components to prevent directory traversal attacks
+    /// 2. Resolve symlinks to prevent sandbox escape via symbolic links
+    /// 3. Final validation: ensure the resolved path stays within `canonical_root`
     fn safe_path(&self, relative_path: &str) -> Result<PathBuf> {
         let path = Path::new(relative_path);
         let mut components = Vec::new();
@@ -48,7 +49,7 @@ impl Sandbox {
         let cleaned = components.iter().collect::<PathBuf>();
         let full = self.workspace_root.join(&cleaned);
 
-        // 解析符号链接以防止沙箱逃逸
+        // Resolve symlinks to prevent sandbox escape
         let resolved = if full.exists() {
             full.canonicalize()?
         } else if let Some(parent) = full.parent() {
@@ -57,7 +58,7 @@ impl Sandbox {
                     .canonicalize()?
                     .join(full.file_name().unwrap_or_default())
             } else {
-                // 父目录链不存在 —— 退回到前缀检查
+                // Parent directory chain does not exist — fall back to prefix check
                 if !full.starts_with(&self.workspace_root) {
                     return Err(anyhow!("Path escapes workspace: {}", relative_path));
                 }
@@ -73,14 +74,15 @@ impl Sandbox {
         Ok(full)
     }
 
-    /// 安全读取文件内容。
+    /// Safely read file contents.
     pub async fn read_file(&self, path: &str) -> Result<String> {
         let full = self.safe_path(path)?;
         let content = fs::read_to_string(&full).await?;
         Ok(content)
     }
 
-    /// 安全写入文件。若文件已存在则自动创建 `.bak` 备份；自动创建缺失的父目录。
+    /// Safely write a file. Creates a `.bak` backup if the file already exists;
+    /// creates missing parent directories automatically.
     pub async fn write_file(&self, path: &str, content: &str) -> Result<()> {
         let full = self.safe_path(path)?;
         if let Some(parent) = full.parent() {
@@ -94,7 +96,8 @@ impl Sandbox {
         Ok(())
     }
 
-    /// 在沙箱工作目录下执行命令。仅允许白名单中的命令，返回 stdout 或 stderr 错误。
+    /// Execute a command within the sandbox working directory.
+    /// Only allowlisted commands are permitted. Returns stdout or a stderr error.
     pub async fn run_command(&self, cmd: &str, args: &[&str]) -> Result<String> {
         let base_cmd = cmd.split_whitespace().next().unwrap_or(cmd);
         if !self.allowed_commands.contains(&base_cmd.to_string()) {

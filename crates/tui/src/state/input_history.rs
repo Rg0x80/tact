@@ -1,9 +1,9 @@
-/// 输入历史状态，支持上下键回溯之前提交过的输入。
+/// Input history state: supports navigating previously submitted inputs with arrow keys.
 pub(crate) struct InputHistory {
     pub(crate) entries: Vec<String>,
-    /// 导航的当前位置；None 表示未进入导航模式。
+    /// Current navigation position; None means not in navigation mode.
     pub(crate) index: Option<usize>,
-    /// 进入导航前用户正在编辑的输入（用于 ESC 返回原位）。
+    /// The input the user was editing before entering navigation (used to restore on ESC).
     pub(crate) saved: String,
 }
 

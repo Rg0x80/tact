@@ -1,7 +1,7 @@
 use crate::state::{App, InputMode};
 use crossterm::event::{KeyCode, KeyEvent};
 
-/// Select 弹窗模式按键处理：上下移动选择，Enter 确认，Esc 取消。
+/// Select popup mode key handling: up/down to navigate, Enter to confirm, Esc to cancel.
 pub(crate) fn handle_select_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {

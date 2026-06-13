@@ -1,7 +1,7 @@
 use super::PlanStep;
 use ratatui::widgets::{ListState, ScrollbarState};
 
-/// Execution Plan 面板状态。
+/// Execution Plan panel state.
 pub(crate) struct PlanPanel {
     pub(crate) steps: Vec<PlanStep>,
     pub(crate) collapsed: Vec<bool>,
