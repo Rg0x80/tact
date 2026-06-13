@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 } else {
-                    eprintln!("Only supported on DeepSeek");
+                    //eprintln!("Only supported on DeepSeek");
                     agent.emit_update(AgentUpdate::Error(AgentErrorKind::BalanceNotSupported));
                 }
             }
