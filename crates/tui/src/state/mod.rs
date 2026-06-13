@@ -13,7 +13,7 @@ mod input_history;
 mod log_scroll;
 mod mouse_state;
 mod plan_panel;
-pub(crate) mod render_md;
+
 mod search_state;
 mod select_popup;
 mod status_bar_state;

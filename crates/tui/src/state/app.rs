@@ -5,8 +5,8 @@ use super::{
     App, CodeBlock, DiffBlock, DiffPopup, FocusedPanel, HistoryEntry, InputHistory, InputMode,
     LogScroll, MouseState, PlanPanel, SearchState, SelectPopup, Status, StatusBarState,
     StreamState, ThinkingBlock, ThinkingPopup, ThinkingState,
-    render_md::{format_table, is_horizontal_rule, render_markdown_tui},
 };
+use crate::render::render_md::{format_table, is_horizontal_rule, render_markdown_tui};
 use crate::i18n::{Language, Messages};
 use crate::theme::{Theme, ThemeName};
 use arboard::Clipboard;
