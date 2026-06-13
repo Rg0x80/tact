@@ -7,11 +7,11 @@ use ratatui::{
 /// 主内容区域布局，根据当前显示状态切换历史、帮助或 Plan+Log 双栏布局。
 pub(crate) fn render_main_area(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.show_history {
-        super::popup::render_history_panel(frame, area, app);
+        super::popups::history::render_history_panel(frame, area, app);
         return;
     }
     if app.show_help {
-        super::popup::render_help_panel(frame, area, app);
+        super::popups::help::render_help_panel(frame, area, app);
         return;
     }
     if app.plan.visible {
@@ -30,9 +30,12 @@ pub(crate) fn render_main_area(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     if app.thinking.popup.is_some() {
-        super::popup::render_thinking_popup(frame, area, app);
+        super::popups::thinking_popup::render_thinking_popup(frame, area, app);
     }
     if app.diff_popup.is_some() {
-        super::popup::render_diff_popup(frame, area, app);
+        super::popups::diff_popup::render_diff_popup(frame, area, app);
+    }
+    if app.code_popup.is_some() {
+        super::popups::code_popup::render_code_popup(frame, area, app);
     }
 }

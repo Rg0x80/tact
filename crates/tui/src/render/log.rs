@@ -3,49 +3,10 @@ use crate::state::App;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarState},
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Scrollbar, ScrollbarState},
 };
-
-/// 构建带搜索高亮的 Line。
-fn build_search_highlighted_line<'a>(
-    raw: &'a str,
-    term: &str,
-    base_fg: Color,
-    is_selected: bool,
-) -> Line<'a> {
-    let mut spans = Vec::new();
-    let lower_raw = raw.to_lowercase();
-    let lower_term = term.to_lowercase();
-    let mut last_idx = 0;
-
-    for (match_idx, _) in lower_raw.match_indices(&lower_term) {
-        if match_idx > last_idx {
-            spans.push(Span::styled(
-                &raw[last_idx..match_idx],
-                Style::default().fg(base_fg),
-            ));
-        }
-        let end_idx = match_idx + lower_term.len();
-        spans.push(Span::styled(
-            &raw[match_idx..end_idx],
-            Style::default().bg(Color::Yellow).fg(Color::Black),
-        ));
-        last_idx = end_idx;
-    }
-    if last_idx < raw.len() {
-        spans.push(Span::styled(&raw[last_idx..], Style::default().fg(base_fg)));
-    }
-
-    let mut line = Line::from(spans);
-    if is_selected {
-        for span in line.spans.iter_mut() {
-            span.style = span.style.add_modifier(Modifier::REVERSED);
-        }
-    }
-    line
-}
 
 /// 渲染 Log 面板，支持长行自动折行、滚动、搜索高亮和鼠标选择高亮。
 pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -139,7 +100,7 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
     };
     let end_visual = (visual_scroll + visible_height).min(total_visual);
 
-    // ---- Phase 3: render visible lines ----
+    // ---- Phase 3: build cells and render ----
     let logical_start = match vs_cache.binary_search(&visual_scroll) {
         Ok(i) => i,
         Err(i) => i.saturating_sub(1),
@@ -151,21 +112,16 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let has_search = !app.search.term.is_empty();
     let has_selection = app.mouse.log_selection.is_some();
+    let search_term = app.search.term.clone();
+    let log_fg = app.theme.fg;
 
-    let mut text = Text::default();
+    let mut renderer = super::log_column::LogColumnRenderer::new()
+        .with_viewport(visual_scroll, visible_height);
+
     for logical_i in logical_start..logical_end {
         let cache_start = vs_cache[logical_i];
         let cache_end = vs_cache[logical_i + 1];
         if cache_end <= visual_scroll || cache_start >= end_visual {
-            continue;
-        }
-
-        let vis_start_in_block = visual_scroll.max(cache_start);
-        let vis_end_in_block = end_visual.min(cache_end);
-        let block_offset = vis_start_in_block - cache_start;
-        let block_count = vis_end_in_block - vis_start_in_block;
-
-        if block_count == 0 {
             continue;
         }
 
@@ -178,374 +134,83 @@ pub(crate) fn render_log_panel(frame: &mut Frame, area: Rect, app: &mut App) {
                 .unwrap_or(false);
 
         let phys_idx = app.visible_indices.get(logical_i).copied();
-        let cached_slice = &app.log_scroll.visual_cache[cache_start..cache_end];
-
-        if !has_search && !is_selected {
-            for line in &cached_slice[block_offset..block_offset + block_count] {
-                text.push_line(line.clone());
-            }
-        } else if has_search && is_match {
-            if let Some(phys) = phys_idx {
-                let raw = &app.raw_messages[phys];
-                let line =
-                    build_search_highlighted_line(raw, &app.search.term, app.theme.fg, is_selected);
-                let wrapped = wrap_line(&line, wrap_width);
-                let local_start = block_offset.min(wrapped.len());
-                let local_end = (block_offset + block_count).min(wrapped.len());
-                for wline in &wrapped[local_start..local_end] {
-                    text.push_line(wline.clone());
-                }
-            }
+        let cached_lines: Vec<Line<'static>> =
+            app.log_scroll.visual_cache[cache_start..cache_end].to_vec();
+        let raw_text = phys_idx
+            .map(|p| app.raw_messages[p].clone())
+            .unwrap_or_default();
+        let word_sel = app
+            .mouse
+            .log_word_selection
+            .filter(|_| is_selected && phys_idx.is_some());
+        let se_search_term = if is_match {
+            search_term.clone()
         } else {
-            // 选择高亮 / 无高亮回退
-            let mut push_count = 0;
-            let word_sel = app
-                .mouse
-                .log_word_selection
-                .filter(|_| is_selected && phys_idx.is_some());
-            for (local_i, cached_line) in cached_slice.iter().enumerate().skip(block_offset) {
-                if push_count >= block_count {
-                    break;
-                }
-                if let Some((ws, we)) = word_sel {
-                    let raw = &app.raw_messages[phys_idx.unwrap()];
-                    let w_start = raw.floor_char_boundary(ws.min(raw.len()));
-                    let w_end = raw.floor_char_boundary(we.min(raw.len()));
-                    let (w_start, w_end) = if w_end < w_start {
-                        (w_end, w_start)
+            String::new()
+        };
+
+        // 构建 thinking 折叠指示前缀
+        let prefix = phys_idx.and_then(|phys| {
+            app.thinking.blocks.iter().find_map(|block| {
+                if block.title_idx == phys {
+                    let total = block.end_idx.saturating_sub(block.title_idx);
+                    if total > 3 {
+                        Some(
+                            app.msgs()
+                                .scroll_indicator_tmpl
+                                .replacen("{}", &total.min(3).to_string(), 1)
+                                .replacen("{}", &total.to_string(), 1),
+                        )
                     } else {
-                        (w_start, w_end)
-                    };
-                    let before = &raw[..w_start];
-                    let word = &raw[w_start..w_end];
-                    let after = &raw[w_end..];
-                    let styled_line = Line::from(vec![
-                        Span::raw(before.to_string()),
-                        Span::styled(
-                            word.to_string(),
-                            Style::default().add_modifier(Modifier::REVERSED),
-                        ),
-                        Span::raw(after.to_string()),
-                    ]);
-                    let wrapped = wrap_line(&styled_line, wrap_width);
-                    let local_start = block_offset.min(wrapped.len());
-                    let local_end = (block_offset + block_count).min(wrapped.len());
-                    for wline in &wrapped[local_start..local_end] {
-                        text.push_line(wline.clone());
-                        push_count += 1;
+                        None
                     }
                 } else {
-                    let mut line = cached_line.clone();
-                    if is_selected {
-                        for span in line.spans.iter_mut() {
-                            span.style = span.style.add_modifier(Modifier::REVERSED);
-                        }
-                    }
-                    if local_i == 0 {
-                        if let Some(phys) = phys_idx {
-                            for block in &app.thinking.blocks {
-                                if block.title_idx == phys {
-                                    let total = block.end_idx.saturating_sub(block.title_idx);
-                                    let indicator = if total > 3 {
-                                        app.msgs()
-                                            .scroll_indicator_tmpl
-                                            .replacen("{}", &total.min(3).to_string(), 1)
-                                            .replacen("{}", &total.to_string(), 1)
-                                    } else {
-                                        String::new()
-                                    };
-                                    if let Some(first) = line.spans.first_mut() {
-                                        first.content =
-                                            format!("{}{}", indicator, first.content).into();
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    text.push_line(line);
-                    push_count += 1;
+                    None
                 }
-            }
-        }
+            })
+        });
+
+        let cell = super::cells::text::TextCell::new(
+            cached_lines,
+            raw_text,
+            se_search_term,
+            is_match,
+            is_selected,
+            word_sel,
+            prefix,
+            log_fg,
+        );
+
+        renderer.push(vs_cache[logical_i], cell);
     }
 
-    let log_paragraph = Paragraph::new(text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(app.theme.border))
-            .title(app.msgs().log_title)
-            .style(Style::default().bg(app.theme.bg)),
+    // 渲染带边框的 log 面板
+    let log_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.border))
+        .title(app.msgs().log_title)
+        .style(Style::default().bg(app.theme.bg));
+    let inner = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
     );
-    frame.render_widget(log_paragraph, area);
+    frame.render_widget(log_block, area);
+    frame.render_widget(Clear, inner);
+    frame.render_widget(renderer, inner);
 
     // ---- Card overlay: thinking blocks ----
-    let vs_cache = &app.log_scroll.visual_start_cache;
-    for block in &app.thinking.blocks {
-        let Some(title_logical) = app.phys_to_logical_fast(block.title_idx) else {
-            continue;
-        };
-        let blank_after_phys = block.end_idx + 1;
-        let Some(blank_after_logical) = app.phys_to_logical_fast(blank_after_phys) else {
-            continue;
-        };
-        if title_logical >= vs_cache.len() || blank_after_logical >= vs_cache.len() {
-            continue;
-        }
-        let vis_card_top = vs_cache[title_logical];
-        let vis_card_bottom = vs_cache[blank_after_logical];
-        let vis_range_end = visual_scroll + visible_height;
-        if vis_card_bottom <= visual_scroll || vis_card_top >= vis_range_end {
-            continue;
-        }
-        let y_top = (vis_card_top.saturating_sub(visual_scroll)) as u16;
-        let y_bot = (vis_card_bottom.saturating_sub(visual_scroll)).min(visible_height as _) as u16;
-        if y_bot <= y_top {
-            continue;
-        }
-
-        let total_lines = block.end_idx.saturating_sub(block.title_idx);
-        let card_style = Style::default().fg(Color::Rgb(140, 140, 220));
-        let visible_count = total_lines.min(3);
-        let showing_from = total_lines.saturating_sub(visible_count);
-        let msgs = app.msgs();
-        let card_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(card_style)
-            .style(Style::default().bg(app.theme.bg))
-            .title(
-                msgs.thinking_card_title
-                    .replacen("{}", &total_lines.to_string(), 1)
-                    .replacen(
-                        "{}",
-                        if total_lines == 1 {
-                            ""
-                        } else {
-                            msgs.thinking_card_title_pl
-                        },
-                        1,
-                    ),
-            )
-            .title_bottom(
-                msgs.thinking_card_bottom
-                    .replacen("{}", &(showing_from + 1).to_string(), 1)
-                    .replacen("{}", &total_lines.to_string(), 1),
-            );
-
-        let card_area = Rect::new(
-            area.x + 1,
-            area.y + 1 + y_top,
-            area.width.saturating_sub(2),
-            y_bot - y_top,
-        );
-        frame.render_widget(card_block, card_area);
-
-        let inner = Rect::new(
-            card_area.x + 1,
-            card_area.y + 1,
-            card_area.width.saturating_sub(2),
-            card_area.height.saturating_sub(2),
-        );
-        if inner.height > 0 && !block.cached_preview.is_empty() {
-            let preview_style = Style::default()
-                .fg(Color::Rgb(180, 180, 200))
-                .bg(app.theme.bg);
-            let start_preview = block.cached_preview.len().saturating_sub(3);
-            let preview_lines: Vec<Line> = block.cached_preview[start_preview..]
-                .iter()
-                .take(3)
-                .map(|s| {
-                    let display = if s.len() > inner.width as usize {
-                        format!("{}…", &s[..inner.width as usize - 1])
-                    } else {
-                        s.clone()
-                    };
-                    Line::from(Span::styled(display, preview_style))
-                })
-                .collect();
-            frame.render_widget(Paragraph::new(preview_lines), inner);
-        }
-    }
+    super::cells::thinking::render_thinking_cards(
+        frame, area, app, visual_scroll, visible_height);
 
     // ---- Diff block overlay ----
-    for block in &app.diff_blocks {
-        let Some(start_logical) = app.phys_to_logical_fast(block.start_idx) else {
-            continue;
-        };
-        let Some(end_logical) = app.phys_to_logical_fast(block.end_idx) else {
-            continue;
-        };
-        if start_logical >= vs_cache.len() || end_logical >= vs_cache.len() {
-            continue;
-        }
-        let vis_top = vs_cache[start_logical];
-        let vis_bot = vs_cache[end_logical];
-        let vis_range_end = visual_scroll + visible_height;
-        if vis_bot <= visual_scroll || vis_top >= vis_range_end {
-            continue;
-        }
-        let y_top = (vis_top.saturating_sub(visual_scroll)) as u16;
-        let y_bot = (vis_bot.saturating_sub(visual_scroll)).min(visible_height as _) as u16;
-        if y_bot <= y_top {
-            continue;
-        }
-
-        let content_lines: Vec<&str> = block.content.lines().collect();
-        let total_lines = content_lines.len();
-
-        let msgs = app.msgs();
-        let card_block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(app.theme.accent))
-            .style(Style::default().bg(app.theme.bg))
-            .title(
-                msgs.diff_card_title
-                    .replacen("{}", &total_lines.to_string(), 1)
-                    .replacen("{}", &block.file_path, 1),
-            )
-            .title_bottom(Line::from(Span::styled(
-                msgs.diff_card_bottom,
-                Style::default().fg(app.theme.accent),
-            )));
-
-        let card_area = Rect::new(
-            area.x + 1,
-            area.y + 1 + y_top,
-            area.width.saturating_sub(2),
-            y_bot - y_top,
-        );
-        frame.render_widget(card_block, card_area);
-
-        let inner = Rect::new(
-            card_area.x + 1,
-            card_area.y + 1,
-            card_area.width.saturating_sub(2),
-            card_area.height.saturating_sub(2),
-        );
-        if inner.height > 0 {
-            let max_visible = inner.height as usize;
-            let num_width = (total_lines + 1).to_string().len().max(3);
-            let code_width = (inner.width as usize).saturating_sub(num_width + 3);
-            let num_style = Style::default().fg(Color::Gray).bg(app.theme.bg);
-            let text_style = Style::default().fg(app.theme.fg).bg(app.theme.bg);
-            let plus_style = Style::default().fg(app.theme.success).bg(app.theme.bg);
-
-            let mut preview_lines: Vec<Line> = content_lines
-                .iter()
-                .take(max_visible)
-                .enumerate()
-                .map(|(i, line)| {
-                    let num = format!("{:>nw$}", i + 1, nw = num_width);
-                    let trimmed: String = line.chars().take(code_width).collect();
-                    Line::from(vec![
-                        Span::styled(format!(" {} ", num), num_style),
-                        Span::styled("+ ", plus_style),
-                        Span::styled(trimmed, text_style),
-                    ])
-                })
-                .collect();
-
-            if total_lines > max_visible {
-                preview_lines.push(Line::from(Span::styled(
-                    app.msgs()
-                        .diff_overflow_tmpl
-                        .replace("{}", &(total_lines - max_visible).to_string()),
-                    Style::default().fg(Color::Gray).bg(app.theme.bg),
-                )));
-            }
-
-            frame.render_widget(Paragraph::new(preview_lines), inner);
-        }
-    }
+    super::cells::diff::render_diff_cards(
+        frame, area, app, visual_scroll, visible_height);
 
     // ---- Code block overlay ----
-    for block in &app.code_blocks {
-        let Some(start_logical) = app.phys_to_logical_fast(block.start_idx) else {
-            continue;
-        };
-        let Some(end_logical) = app.phys_to_logical_fast(block.end_idx.saturating_sub(1)) else {
-            continue;
-        };
-        if start_logical >= vs_cache.len() || end_logical + 1 >= vs_cache.len() {
-            continue;
-        }
-        let vis_top = vs_cache[start_logical];
-        let vis_bot = vs_cache[end_logical + 1];
-        let vis_range_end = visual_scroll + visible_height;
-        if vis_bot <= visual_scroll || vis_top >= vis_range_end {
-            continue;
-        }
-        let y_top = (vis_top.saturating_sub(visual_scroll)) as u16;
-        let y_bot =
-            (vis_bot.saturating_sub(visual_scroll)).min(visible_height) as u16;
-        if y_bot <= y_top {
-            continue;
-        }
-
-        let lang_label = if block.lang.is_empty() {
-            "code".to_string()
-        } else {
-            block.lang.clone()
-        };
-        let total_styled = block.styled.len();
-        let inner_h = (y_bot.saturating_sub(y_top).saturating_sub(2)) as usize;
-        let shown = total_styled.min(inner_h);
-        let card_block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Rgb(100, 120, 180)))
-            .style(Style::default().bg(Color::Rgb(20, 24, 38)))
-            .title(Span::styled(
-                format!(" {} ", lang_label),
-                Style::default()
-                    .fg(Color::Rgb(160, 180, 240))
-                    .add_modifier(Modifier::BOLD),
-            ))
-            .title_bottom(if total_styled > shown {
-                Line::from(Span::styled(
-                    format!(" +{} lines ", total_styled - shown),
-                    Style::default().fg(Color::DarkGray),
-                ))
-            } else {
-                Line::from("")
-            });
-
-        let card_area = Rect::new(
-            area.x + 1,
-            area.y + 1 + y_top,
-            area.width.saturating_sub(2),
-            y_bot - y_top,
-        );
-        frame.render_widget(card_block, card_area);
-
-        let inner = Rect::new(
-            card_area.x + 1,
-            card_area.y + 1,
-            card_area.width.saturating_sub(2),
-            card_area.height.saturating_sub(2),
-        );
-        if inner.height > 0 && !block.styled.is_empty() {
-            let max_rows = inner.height as usize;
-            let lines: Vec<Line> = block
-                .styled
-                .iter()
-                .take(max_rows)
-                .map(|l| {
-                    // Pad/truncate each line to fill the inner width
-                    let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-                    let display: String = text.chars().take(inner.width as usize).collect();
-                    let base_style = l.spans.first().map(|s| s.style).unwrap_or_default();
-                    Line::from(Span::styled(display, base_style))
-                })
-                .collect();
-            frame.render_widget(
-                ratatui::widgets::Paragraph::new(lines)
-                    .style(Style::default().bg(Color::Rgb(20, 24, 38))),
-                inner,
-            );
-        }
-    }
+    super::cells::code::render_code_cards(
+        frame, area, app, visual_scroll, visible_height);
 
     // Scrollbar
     let scrollbar = Scrollbar::default()

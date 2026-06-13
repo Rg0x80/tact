@@ -14,7 +14,7 @@ pub(crate) fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
         FocusedPanel::Plan => msgs.bottom_focus_log_plan,
         FocusedPanel::Log => msgs.bottom_focus_log,
     };
-    let tips = match app.focused_panel {
+    let _tips = match app.focused_panel {
         FocusedPanel::Log => msgs.bottom_tips_log,
         FocusedPanel::Plan => msgs.bottom_tips_plan,
     };
