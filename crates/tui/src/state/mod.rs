@@ -79,6 +79,11 @@ pub(crate) struct DiffBlock {
     pub end_idx: usize,
     pub file_path: String,
     pub content: String,
+    /// Total number of lines in `content` (cached to avoid recomputing every frame).
+    pub line_count: usize,
+    /// Pre-split content lines used by the diff card preview (cached to avoid
+    /// `lines().collect()` on every render).
+    pub preview_lines: Vec<String>,
 }
 
 /// Popup preview state for file write content.

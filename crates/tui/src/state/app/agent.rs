@@ -121,8 +121,10 @@ impl App {
                 if result.tool == "write_file"
                     && let Some(content) = result.detail
                 {
-                    let content_lines = content.lines().count();
-                    let max_preview = 20usize;
+                    let preview_lines: Vec<String> =
+                        content.lines().map(|s| s.to_string()).collect();
+                    let content_lines = preview_lines.len();
+                    let max_preview = 10usize;
                     let preview_count = content_lines.min(max_preview);
                     // Placeholders: top title + preview content + overflow hint (optional) + bottom border + separator blank
                     let more = if content_lines > max_preview { 1 } else { 0 };
@@ -138,6 +140,8 @@ impl App {
                         end_idx,
                         file_path: result.arg_summary.clone(),
                         content: content.clone(),
+                        line_count: content_lines,
+                        preview_lines,
                     });
                     self.log_scroll.state =
                         ScrollbarState::new(self.total_log_lines().saturating_sub(1));
