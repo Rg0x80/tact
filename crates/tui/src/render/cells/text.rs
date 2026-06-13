@@ -1,6 +1,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
+use unicode_width::UnicodeWidthChar;
 use ratatui::text::{Line, Span};
 use crate::render::renderable::Renderable;
 use crate::render::util::wrap_line;
@@ -12,7 +13,7 @@ fn render_line(line: &Line, x: u16, y: u16, width: u16, buf: &mut Buffer) {
         for ch in span.content.chars() {
             if col < x + width {
                 buf[(col, y)].set_char(ch).set_style(span.style);
-                col += 1;
+                col += UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
             }
         }
     }

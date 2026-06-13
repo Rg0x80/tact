@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 use crate::state::App;
 
@@ -77,6 +77,7 @@ pub(crate) fn render_code_cards(
             area.width.saturating_sub(2),
             y_bot - y_top,
         );
+        frame.render_widget(Clear, card_area);
         frame.render_widget(card_block, card_area);
 
         let inner = Rect::new(
