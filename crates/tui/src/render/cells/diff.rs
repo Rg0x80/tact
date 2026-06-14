@@ -38,8 +38,7 @@ pub(crate) fn render_diff_cards(
             continue;
         }
 
-        let content_lines: Vec<&str> = block.content.lines().collect();
-        let total_lines = content_lines.len();
+        let total_lines = block.line_count;
 
         let msgs = app.msgs();
         let card_block = Block::default()
@@ -80,7 +79,8 @@ pub(crate) fn render_diff_cards(
             let text_style = Style::default().fg(app.theme.fg).bg(app.theme.bg);
             let plus_style = Style::default().fg(app.theme.success).bg(app.theme.bg);
 
-            let mut preview_lines: Vec<Line> = content_lines
+            let mut preview_lines: Vec<Line> = block
+                .preview_lines
                 .iter()
                 .take(max_visible)
                 .enumerate()

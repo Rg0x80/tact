@@ -3,6 +3,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{ListState, ScrollbarState};
 use tact_core::{AgentErrorKind, AgentUpdate, StepStatus, UserCommand};
+use crate::render::render_md::{format_table, is_horizontal_rule, render_markdown_tui};
 
 const CODE_BG: Color = Color::Rgb(30, 35, 50);
 const CODE_FG: Color = Color::Rgb(200, 200, 210);
@@ -120,11 +121,16 @@ impl App {
                 if result.tool == "write_file"
                     && let Some(content) = result.detail
                 {
+                    const MAX_PREVIEW_LINES: usize = 200;
                     let content_lines = content.lines().count();
-                    let max_preview = 20usize;
-                    let preview_count = content_lines.min(max_preview);
+                    let preview_count = content_lines.min(10);
+                    let preview_lines: Vec<String> = content
+                        .lines()
+                        .take(MAX_PREVIEW_LINES)
+                        .map(|s| s.to_string())
+                        .collect();
                     // Placeholders: top title + preview content + overflow hint (optional) + bottom border + separator blank
-                    let more = if content_lines > max_preview { 1 } else { 0 };
+                    let more = if content_lines > 10 { 1 } else { 0 };
                     let placeholder_count = 2 + preview_count + more + 1;
                     let start_idx = self.messages.len();
                     for _ in 0..placeholder_count {
@@ -136,7 +142,8 @@ impl App {
                         start_idx,
                         end_idx,
                         file_path: result.arg_summary.clone(),
-                        content: content.clone(),
+                        line_count: content_lines,
+                        preview_lines,
                     });
                     self.log_scroll.state =
                         ScrollbarState::new(self.total_log_lines().saturating_sub(1));

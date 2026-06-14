@@ -78,16 +78,21 @@ pub(crate) struct DiffBlock {
     /// Ending line index of the diff block (in messages, exclusive).
     pub end_idx: usize,
     pub file_path: String,
-    pub content: String,
+    /// Total number of lines in the written file (cached to avoid recomputing every frame).
+    pub line_count: usize,
+    /// Pre-split content lines used by the diff card preview (cached to avoid
+    /// `lines().collect()` on every render). Only the first `MAX_PREVIEW_LINES`
+    /// are stored to keep memory usage bounded for large files.
+    pub preview_lines: Vec<String>,
 }
 
 /// Popup preview state for file write content.
 #[derive(Debug, Clone)]
 pub(crate) struct DiffPopup {
-    pub block_idx: usize,
     pub file_path: String,
-    pub content: String,
     pub scroll: u16,
+    /// Lazily-loaded full file content. `None` until first render/population.
+    pub cached_content: Option<String>,
 }
 
 /// A completed LLM code block, rendered as a card overlay in the log panel.

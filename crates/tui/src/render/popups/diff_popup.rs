@@ -1,13 +1,32 @@
-use ratatui::{Frame, layout::Rect, style::{Color, Modifier, Style}, text::{Line, Span, Text}, widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarState, Wrap}};
+use ratatui::{Frame, layout::Rect, style::Style, text::{Line, Span, Text}, widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarState, Wrap}};
 use crate::state::App;
 
 pub(crate) fn render_diff_popup(frame: &mut Frame, area: Rect, app: &mut App) {
-    let popup = match &app.diff_popup {
+    let file_path = app.diff_popup.as_ref().map(|p| p.file_path.clone());
+    let file_path = match file_path {
         Some(p) => p,
         None => return,
     };
 
-    let lines: Vec<&str> = popup.content.lines().collect();
+    let popup = app.diff_popup.as_mut().unwrap();
+
+    if popup.cached_content.is_none() {
+        popup.cached_content = std::fs::read_to_string(&file_path).ok();
+    }
+    let content = match &popup.cached_content {
+        Some(c) => c,
+        None => {
+            let err = format!("Unable to read file: {}", file_path);
+            let para = Paragraph::new(err)
+                .block(Block::default()
+                    .borders(Borders::ALL)
+                    .title(app.msgs().diff_popup_title.replace("{}", &file_path)));
+            frame.render_widget(para, area);
+            return;
+        }
+    };
+
+    let lines: Vec<&str> = content.lines().collect();
     let total = lines.len();
     if total == 0 { return; }
 
@@ -43,7 +62,7 @@ pub(crate) fn render_diff_popup(frame: &mut Frame, area: Rect, app: &mut App) {
     let para = Paragraph::new(text)
         .block(Block::default()
             .borders(Borders::ALL)
-            .title(app.msgs().diff_popup_title.replace("{}", &popup.file_path))
+            .title(app.msgs().diff_popup_title.replace("{}", &file_path))
             .title_bottom(Line::from(vec![
                 Span::styled(app.msgs().popup_copy_hint, Style::default().fg(app.theme.accent)),
                 Span::styled(app.msgs().popup_close_hint, Style::default().fg(app.theme.accent)),

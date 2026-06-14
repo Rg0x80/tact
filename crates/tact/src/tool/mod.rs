@@ -361,6 +361,66 @@ mod tests {
         assert_eq!(schema["properties"]["b"]["type"], "integer");
     }
 
+    #[tokio::test]
+    async fn write_file_creates_expected_content() {
+        let router = ToolRouter::new().route(WriteFileTool);
+        let context = test_context("write_file_creates_expected_content");
+        let path = "test.txt";
+        let content = "hello world\nsecond line\n";
+
+        let output = router
+            .call(
+                &context,
+                "write_file",
+                serde_json::json!({ "path": path, "content": content }),
+            )
+            .await
+            .unwrap();
+
+        assert!(output.contains("Wrote"));
+        assert!(output.contains("test.txt"));
+        assert!(output.contains("bytes"));
+        assert!(output.contains("lines"));
+        let written =
+            std::fs::read_to_string(context.work_dir.join(path)).unwrap();
+        assert_eq!(written, content);
+    }
+
+    #[tokio::test]
+    async fn write_file_emits_progress_for_large_content() {
+        let router = ToolRouter::new().route(WriteFileTool);
+        let mut context = test_context("write_file_emits_progress");
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        context.ui_tx = Some(tx);
+
+        // Content larger than MIN_PROGRESS_SIZE to trigger progress messages.
+        let content = "x".repeat(300 * 1024);
+        let path = "large.txt";
+
+        let output = router
+            .call(
+                &context,
+                "write_file",
+                serde_json::json!({ "path": path, "content": content }),
+            )
+            .await
+            .unwrap();
+
+        assert!(output.contains("Wrote"));
+        let written = std::fs::read_to_string(context.work_dir.join(path)).unwrap();
+        assert_eq!(written.len(), content.len());
+
+        let mut progress_count = 0;
+        while let Ok(update) = rx.try_recv() {
+            if let AgentUpdate::Info(msg) = update {
+                assert!(msg.contains("Writing"));
+                assert!(msg.contains("large.txt"));
+                progress_count += 1;
+            }
+        }
+        assert!(progress_count > 0, "expected at least one progress update");
+    }
+
     fn test_context(name: &str) -> ToolContext {
         let root_dir = std::env::temp_dir().join(format!("tact-tool-test-{name}"));
         let _ = std::fs::remove_dir_all(&root_dir);
