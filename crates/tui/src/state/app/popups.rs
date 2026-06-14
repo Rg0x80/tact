@@ -177,17 +177,16 @@ impl App {
 
     /// Open a file content popup, accepting the diff block's starting line index.
     pub(crate) fn open_diff_popup(&mut self, start_idx: usize) {
-        if let Some((bi, block)) = self
+        if let Some((_, block)) = self
             .diff_blocks
             .iter()
             .enumerate()
             .find(|(_, b)| b.start_idx == start_idx)
         {
             self.diff_popup = Some(DiffPopup {
-                block_idx: bi,
                 file_path: block.file_path.clone(),
-                content: block.content.clone(),
                 scroll: 0,
+                cached_content: None,
             });
         }
     }
@@ -217,7 +216,14 @@ impl App {
             Some(p) => p,
             None => return,
         };
-        let text = &popup.content;
+        let path = &popup.file_path;
+        let text = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(e) => {
+                self.add_system_message(format!("⚠️ Could not read {}: {}", path, e));
+                return;
+            }
+        };
         let preview = if text.chars().count() > 40 {
             format!("{}…", text.chars().take(40).collect::<String>())
         } else {
@@ -225,18 +231,18 @@ impl App {
         };
 
         if let Ok(mut clip) = Clipboard::new()
-            && clip.set_text(text).is_ok()
+            && clip.set_text(&text).is_ok()
         {
             self.add_system_message(format!("📋 Copied: {}", preview));
             return;
         }
-        let encoded = BASE64.encode(text);
+        let encoded = BASE64.encode(&text);
         let osc52 = format!("\x1b]52;c;{}\x07", encoded);
         if std::io::Write::write_all(&mut std::io::stdout(), osc52.as_bytes()).is_ok() {
             self.add_system_message(format!("📋 Copied to terminal clipboard: {}", preview));
             return;
         }
-        self.clipboard_buffer = text.clone();
+        self.clipboard_buffer = text;
         self.add_system_message(format!(
             "📋 Copied to internal buffer (clipboard unavailable): {}",
             preview

@@ -843,6 +843,7 @@ Be compact but concrete. Preserve exact file paths, function names, and type sig
                 "When editing files, always re-read the file first if its content may have changed since you last read it",
                 "For multi-line changes, prefer apply_patch; for single-line exact replacements, use edit_file",
                 "If a tool result was compacted and you need the details, re-run the relevant tool (e.g., read_file)",
+                "For small edits to existing files, prefer edit_file over write_file; use write_file only for new files or complete rewrites",
             ])
             .skills_available(self.tool_context.skill_registry.describe_available())
             .memory(self.load_memory_prompt()?)

@@ -121,13 +121,16 @@ impl App {
                 if result.tool == "write_file"
                     && let Some(content) = result.detail
                 {
-                    let preview_lines: Vec<String> =
-                        content.lines().map(|s| s.to_string()).collect();
-                    let content_lines = preview_lines.len();
-                    let max_preview = 10usize;
-                    let preview_count = content_lines.min(max_preview);
+                    const MAX_PREVIEW_LINES: usize = 200;
+                    let content_lines = content.lines().count();
+                    let preview_count = content_lines.min(10);
+                    let preview_lines: Vec<String> = content
+                        .lines()
+                        .take(MAX_PREVIEW_LINES)
+                        .map(|s| s.to_string())
+                        .collect();
                     // Placeholders: top title + preview content + overflow hint (optional) + bottom border + separator blank
-                    let more = if content_lines > max_preview { 1 } else { 0 };
+                    let more = if content_lines > 10 { 1 } else { 0 };
                     let placeholder_count = 2 + preview_count + more + 1;
                     let start_idx = self.messages.len();
                     for _ in 0..placeholder_count {
@@ -139,7 +142,6 @@ impl App {
                         start_idx,
                         end_idx,
                         file_path: result.arg_summary.clone(),
-                        content: content.clone(),
                         line_count: content_lines,
                         preview_lines,
                     });

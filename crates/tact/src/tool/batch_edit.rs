@@ -187,10 +187,10 @@ pub async fn batch_edit(ctx: ToolContext, input: BatchEditInput) -> Result<Strin
     }
 
     if let Some((failed_path, e)) = first_error {
-        // Rollback already-written files
+        // Rollback already-written files asynchronously.
         let mut rollback_errors: Vec<String> = Vec::new();
         for (rb_path, rb_original) in &written {
-            if let Err(re) = std::fs::write(rb_path, rb_original) {
+            if let Err(re) = tokio::fs::write(rb_path, rb_original).await {
                 rollback_errors.push(format!("  rollback {}: {}", rb_path, re));
             }
         }

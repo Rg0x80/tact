@@ -20,9 +20,9 @@ pub struct WriteFileInput {
 /// blocking pool; smaller chunks let us emit progress updates without blocking
 /// the executor for too long.
 const WRITE_CHUNK_SIZE: usize = 64 * 1024;
-/// Only emit progress messages for files larger than this threshold, avoiding
-/// log spam for small writes.
-const MIN_PROGRESS_SIZE: usize = 256 * 1024;
+/// Files smaller than this are written in a single operation to avoid the
+/// overhead of chunking and progress tracking.
+const SINGLE_WRITE_THRESHOLD: usize = 256 * 1024;
 
 #[tool(name = "write_file", description = "Write content to file.")]
 pub async fn write_file(ctx: ToolContext, input: WriteFileInput) -> Result<String> {
@@ -34,52 +34,64 @@ pub async fn write_file(ctx: ToolContext, input: WriteFileInput) -> Result<Strin
 
     let total = input.content.len();
     let bytes = input.content.as_bytes();
+    let line_count = input.content.lines().count();
 
-    let mut file = fs::File::create(&path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Error creating file: {}", e))?;
-
-    let mut written = 0usize;
-    let mut next_milestone = total / 10;
-    let mut last_update = Instant::now();
-    let update_interval = Duration::from_millis(500);
-
-    for chunk in bytes.chunks(WRITE_CHUNK_SIZE) {
-        file.write_all(chunk)
+    if total <= SINGLE_WRITE_THRESHOLD {
+        fs::write(&path, bytes)
             .await
             .map_err(|e| anyhow::anyhow!("Error writing file: {}", e))?;
-        written += chunk.len();
+    } else {
+        let mut file = fs::File::create(&path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Error creating file: {}", e))?;
 
-        if total >= MIN_PROGRESS_SIZE && written < total {
-            let now = Instant::now();
-            let time_elapsed = now.duration_since(last_update) >= update_interval;
-            let milestone_reached = written >= next_milestone;
+        let mut written = 0usize;
+        let mut next_milestone = total / 10;
+        let mut last_update = Instant::now();
+        let update_interval = Duration::from_millis(200);
 
-            if milestone_reached || time_elapsed {
-                let pct = (written * 100 / total) as u64;
-                if let Some(ref tx) = ctx.ui_tx {
-                    let _ = tx.send(AgentUpdate::Info(format!(
-                        "Writing {}... {}% ({} / {} bytes)",
-                        path.display(),
-                        pct,
-                        written,
-                        total
-                    )));
-                }
-                last_update = now;
-                if milestone_reached {
-                    next_milestone += total / 10;
-                    if next_milestone > total {
-                        next_milestone = total;
+        for chunk in bytes.chunks(WRITE_CHUNK_SIZE) {
+            file.write_all(chunk)
+                .await
+                .map_err(|e| anyhow::anyhow!("Error writing file: {}", e))?;
+            written += chunk.len();
+
+            if written < total {
+                let now = Instant::now();
+                let time_elapsed = now.duration_since(last_update) >= update_interval;
+                let milestone_reached = written >= next_milestone;
+
+                if milestone_reached || time_elapsed {
+                    let pct = (written * 100 / total) as u64;
+                    if let Some(ref tx) = ctx.ui_tx {
+                        let _ = tx.send(AgentUpdate::Info(format!(
+                            "Writing {}... {}% ({} / {} bytes)",
+                            path.display(),
+                            pct,
+                            written,
+                            total
+                        )));
+                    }
+                    last_update = now;
+                    if milestone_reached {
+                        next_milestone += total / 10;
+                        if next_milestone > total {
+                            next_milestone = total;
+                        }
                     }
                 }
             }
         }
+
+        file.flush()
+            .await
+            .map_err(|e| anyhow::anyhow!("Error flushing file: {}", e))?;
     }
 
-    file.flush()
-        .await
-        .map_err(|e| anyhow::anyhow!("Error flushing file: {}", e))?;
-
-    Ok(format!("Wrote {} bytes to {}", total, path.display()))
+    Ok(format!(
+        "Wrote {} bytes / {} lines to {}",
+        total,
+        line_count,
+        path.display()
+    ))
 }
